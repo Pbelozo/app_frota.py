@@ -3,15 +3,19 @@ import pandas as pd
 from datetime import datetime, date
 import os
 
+# Configuração da página
 st.set_page_config(page_title="Frota Empresa", page_icon="🚗", layout="wide")
 st.title("🚗 Gestão de Frota - Oficial")
 
+# 1. Lista de Veículos
 carros = {
     "Prisma": "FNZ6B39", "UP": "GCP3490", "Saveiro": "SUO3J14",
     "Strada": "TEQ3I82", "Onix": "FPQ7B62"
 }
-lista_v = [f("{n} ({p})") for n, p in carros.items()]
+# CORREÇÃO DA LINHA 13:
+lista_v = [f"{n} ({p})" for n, p in carros.items()]
 
+# 2. Mapa de Peças
 pecas = [
     "1. Paralama dianteiro esquerdo", "2. Paralama dianteiro direito", "3. Párachoque dianteiro",
     "4. Capô", "5. Parabrisa", "6. Teto", "7. Porta dianteiro direito",
@@ -37,7 +41,7 @@ def get_status(v_alvo):
         except: pass
     return {"acao": "CHEGADA", "user": "Ninguém", "km": 0, "av": "Nenhuma"}
 
-t1, t2, t3, t4 = st.tabs(["📤 Saída", "📥 Chegada", "🔧 Manutenção", "📋 Histórico Geral"])
+t1, t2, t3, t4 = st.tabs(["📤 Saída", "📥 Chegada", "🔧 Manutenção", "📋 Histórico"])
 
 # --- ABA 1: SAÍDA ---
 with t1:
@@ -61,7 +65,7 @@ with t1:
                 brutos = [x.strip() for x in st_s['av'].replace('|', ',').split(',')]
                 d_av = [x for x in brutos if x in pecas]
 
-            av_s = st.multiselect("Checklist de Avarias (Herdado):", pecas, default=d_av, key="as")
+            av_s = st.multiselect("Checklist de Avarias (Estado Atual):", pecas, default=d_av, key="as")
             ob_s = st.text_area("Obs. Saída:", key="os")
             
             if st.button("Confirmar Saída"):
@@ -89,7 +93,7 @@ with t2:
         st.warning("👤 Motorista: " + st_d["user"])
         km_d = st.number_input("KM Final", min_value=st_d['km'], value=st_d['km'], step=1, key="kd")
         st.write("**Avarias na saída:** " + st_d["av"])
-        n_av = st.multiselect("Novas avarias:", pecas, key="ad")
+        n_av = st.multiselect("Novas avarias detectadas:", pecas, key="ad")
         ob_d = st.text_area("Obs. Chegada:", key="od")
         
         if st.button("Confirmar Chegada"):
@@ -107,47 +111,37 @@ with t2:
             st.success("Chegada registada!")
             st.rerun()
 
-# --- ABA 3: MANUTENÇÃO (NOVA) ---
-with t4: # Coloquei no final para organização, mas o tab3 é o Histórico
-    pass 
-
+# --- ABA 3: MANUTENÇÃO ---
 with t3:
-    st.header("🔧 Gestão de Reparos e Avarias")
-    v_m = st.selectbox("Selecione o Veículo para Manutenção", lista_v, key="vm")
+    st.header("🔧 Gestão de Reparos")
+    v_m = st.selectbox("Veículo para Manutenção", lista_v, key="vm")
     st_m = get_status(v_m)
     
-    st.subheader("Estado Atual das Avarias")
     if st_m["av"] == "Nenhuma":
-        st.success("✅ Este veículo não possui avarias registradas.")
+        st.success("✅ Este veículo não possui avarias pendentes.")
     else:
-        st.warning("⚠️ Avarias detectadas: " + st_m["av"])
-        
-        # Converter avarias atuais em lista para o multiselect de reparo
+        st.warning("⚠️ Itens com avaria: " + st_m["av"])
         lista_atual = [x.strip() for x in st_m['av'].replace('|', ',').split(',')]
-        reparados = st.multiselect("Selecione os itens que foram REPARADOS:", lista_atual, key="reparo")
-        mecanico = st.text_input("Responsável pelo Reparo / Oficina", key="mec")
-        obs_m = st.text_area("Detalhes do Serviço:", key="obm")
+        reparados = st.multiselect("Marque os itens que foram CONSERTADOS:", lista_atual, key="reparo")
+        mecanico = st.text_input("Responsável/Oficina", key="mec")
         
-        if st.button("Registrar Conserto"):
+        if st.button("Registar Reparo"):
             if reparados and mecanico:
-                # Calcular novas avarias totais (subtraindo as reparadas)
-                restantes = [item for item in lista_atual if item not in reparados]
-                novas_totais = " | ".join(restantes) if restantes else "Nenhuma"
+                restantes = [i for i in lista_atual if i not in reparados]
+                novas_av = " | ".join(restantes) if restantes else "Nenhuma"
                 
                 nova_l = pd.DataFrame([{
                     "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
                     "Ação": "REPARO", "Veículo": v_m, "Usuário": mecanico, "KM": st_m["km"],
-                    "CNH": "N/A", "Av_Saida": "Reparo de: " + ", ".join(reparados),
-                    "Av_Chegada": "N/A", "Av_Totais": novas_totais, "Obs": obs_m
+                    "CNH": "N/A", "Av_Saida": "Conserto de: " + ", ".join(reparados),
+                    "Av_Chegada": "N/A", "Av_Totais": novas_av, "Obs": "Manutenção realizada"
                 }])
                 pd.concat([pd.read_csv(arq), nova_l], ignore_index=True).to_csv(arq, index=False)
-                st.success("Reparo registrado! O histórico do veículo foi limpo.")
+                st.success("Reparo gravado! O veículo foi atualizado.")
                 st.rerun()
-            else:
-                st.error("Informe os itens reparados e o responsável.")
 
 # --- ABA 4: HISTÓRICO ---
 with t4:
-    st.header("📋 Histórico Geral de Movimentação")
+    st.header("📋 Histórico Geral")
     if os.path.exists(arq):
         st.dataframe(pd.read_csv(arq), use_container_width=True)
