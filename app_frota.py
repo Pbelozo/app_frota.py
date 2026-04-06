@@ -23,7 +23,7 @@ mapa_pecas = [
     "14. Párachoque traseiro", "15. Pane mecânica / elétrica"
 ]
 
-# NOME DO ARQUIVO FIXO PARA NÃO PERDER DADOS
+# Nome do arquivo fixo
 arquivo_dados = "gestao_frota_oficial.csv"
 
 # Inicializar arquivo se não existir
@@ -84,10 +84,4 @@ with tab1:
 with tab2:
     st.header("Registar Chegada")
     v_d = st.selectbox("Selecione o Veículo", lista_exibicao, key="vd")
-    status_d = buscar_dados_veiculo_especifico(v_d)
-    
-    if status_d["acao"] == "CHEGADA":
-        st.info(f"ℹ️ O {v_d} já está no pátio.")
-    else:
-        st.warning(f"👤 Motorista: {status_d['motorista']} | Saída com KM: {status_d['km_ultimo']}")
-        km_d = st.number_
+    status_d = buscar_dados_
