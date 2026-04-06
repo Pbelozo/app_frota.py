@@ -5,7 +5,7 @@ import os
 
 # Configuração da página
 st.set_page_config(page_title="Frota Empresa", page_icon="🚗")
-st.title("🚗 Gestão de Frota - Controlo de Fluxo")
+st.title("🚗 Gestão de Frota - Auditoria Blindada")
 
 # 1. Lista de Veículos
 veiculos_dados = {
@@ -23,92 +23,64 @@ mapa_pecas = [
     "14. Tampa do Porta-malas", "15. Lanterna Traseira"
 ]
 
-arquivo_dados = "historico_frota_v9.csv"
+arquivo_dados = "historico_frota_v10.csv"
 
-# Inicializar arquivo
 if not os.path.exists(arquivo_dados):
-    pd.DataFrame(columns=["Data", "Ação", "Veículo", "Usuário", "KM", "Avarias_Saida", "Avarias_Chegada", "Observações"]).to_csv(arquivo_dados, index=False)
+    cols = ["Data", "Ação", "Veículo", "Usuário", "KM", "Avarias_Saida", "Novas_Avarias_Chegada", "Avarias_Totais", "Observações"]
+    pd.DataFrame(columns=cols).to_csv(arquivo_dados, index=False)
 
-# Função para verificar o status atual do veículo
 def verificar_status_veiculo(veiculo):
     if os.path.exists(arquivo_dados):
         df = pd.read_csv(arquivo_dados)
         filtro = df[df['Veículo'] == veiculo]
         if not filtro.empty:
             ultimo = filtro.iloc[-1]
-            # Se o último registro do carro foi SAÍDA, ele está na rua
+            # Se for SAÍDA, buscamos as avarias que ele registrou na saída
+            av_saida_str = str(ultimo['Avarias_Saida'])
             return {
                 "acao": ultimo['Ação'],
                 "motorista": ultimo['Usuário'],
-                "avarias": str(ultimo['Avarias_Saida']).split(", ") if ultimo['Avarias_Saida'] != "Nenhuma" else []
+                "avarias_saida": av_saida_str if av_saida_str != "Nenhuma" else "Nenhuma"
             }
-    return {"acao": "CHEGADA", "motorista": "Ninguém", "avarias": []}
+    return {"acao": "CHEGADA", "motorista": "Ninguém", "avarias_saida": "Nenhuma"}
 
 tab1, tab2, tab3 = st.tabs(["📤 Saída", "📥 Chegada", "📋 Histórico"])
 
-# --- ABA DE SAÍDA ---
 with tab1:
     st.header("Registar Saída")
-    v_s = st.selectbox("Selecione o Veículo para Saída", lista_exibicao, key="vs")
-    
+    v_s = st.selectbox("Veículo", lista_exibicao, key="vs")
     status_s = verificar_status_veiculo(v_s)
     
     if status_s["acao"] == "SAÍDA":
-        st.error(f"🚫 VEÍCULO EM USO: Este carro foi retirado por **{status_s['motorista']}**. É necessário registar a chegada antes de uma nova saída.")
+        st.error(f"🚫 VEÍCULO EM USO por **{status_s['motorista']}**.")
     else:
-        st.success("✅ Veículo disponível no pátio.")
-        n_s = st.text_input("Nome do Motorista", key="ns")
+        n_s = st.text_input("Motorista", key="ns")
         km_s = st.number_input("KM Inicial", min_value=0, step=1, key="ks")
-        av_s = st.multiselect("Avarias identificadas na saída:", mapa_pecas, key="as", default=status_s["avarias"])
-        obs_s = st.text_area("Observações de Saída:", key="os")
+        av_s = st.multiselect("Avarias identificadas na saída:", mapa_pecas, key="as")
+        obs_s = st.text_area("Observações:", key="os")
         
         if st.button("Confirmar Saída"):
             if n_s:
+                txt_av_s = ", ".join(av_s) if av_s else "Nenhuma"
                 nova_l = pd.DataFrame([{
                     "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
                     "Ação": "SAÍDA", "Veículo": v_s, "Usuário": n_s, "KM": km_s,
-                    "Avarias_Saida": ", ".join(av_s) if av_s else "Nenhuma",
-                    "Avarias_Chegada": "Pendente", "Observações": obs_s
+                    "Avarias_Saida": txt_av_s, "Novas_Avarias_Chegada": "N/A",
+                    "Avarias_Totais": txt_av_s, "Observações": obs_s
                 }])
-                df_atual = pd.read_csv(arquivo_dados)
-                df_final = pd.concat([df_atual, nova_l], ignore_index=True)
-                df_final.to_csv(arquivo_dados, index=False)
-                st.success("Saída registada com sucesso!")
+                df_f = pd.concat([pd.read_csv(arquivo_dados), nova_l], ignore_index=True)
+                df_f.to_csv(arquivo_dados, index=False)
+                st.success("Saída registada!")
                 st.rerun()
-            else:
-                st.error("Por favor, insira o nome do motorista.")
 
-# --- ABA DE CHEGADA ---
 with tab2:
     st.header("Registar Chegada")
-    v_d = st.selectbox("Selecione o Veículo para Chegada", lista_exibicao, key="vd")
-    
+    v_d = st.selectbox("Veículo", lista_exibicao, key="vd")
     status_d = verificar_status_veiculo(v_d)
     
     if status_d["acao"] == "CHEGADA":
-        st.info("ℹ️ Este veículo já se encontra no pátio.")
+        st.info("ℹ️ Veículo disponível no pátio.")
     else:
-        st.warning(f"👤 Motorista que retirou: **{status_d['motorista']}**")
-        km_d = st.number_input("KM Final", min_value=0, step=1, key="kd")
-        # Traz as avarias da saída como padrão
-        av_d = st.multiselect("Estado na chegada (Confirme se há algo novo):", mapa_pecas, default=status_d["avarias"], key="ad")
-        obs_d = st.text_area("Observações de Chegada:", key="od")
-        
-        if st.button("Confirmar Chegada"):
-            nova_l = pd.DataFrame([{
-                "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                "Ação": "CHEGADA", "Veículo": v_d, "Usuário": status_d["motorista"],
-                "KM": km_d, "Avarias_Saida": ", ".join(status_d["avarias"]) if status_d["avarias"] else "Nenhuma",
-                "Avarias_Chegada": ", ".join(av_d) if av_d else "Nenhuma", "Observações": obs_d
-            }])
-            df_atual = pd.read_csv(arquivo_dados)
-            df_final = pd.concat([df_atual, nova_l], ignore_index=True)
-            df_final.to_csv(arquivo_dados, index=False)
-            st.success("Chegada concluída!")
-            st.rerun()
-
-# --- ABA DE HISTÓRICO ---
-with tab3:
-    st.header("Auditoria de Frota")
-    if os.path.exists(arquivo_dados):
-        st.dataframe(pd.read_csv(arquivo_dados))
+        st.warning(f"👤 Motorista: **{status_d['motorista']}**")
+        # EXIBIÇÃO BLOQUEADA DAS AVARIAS DA SAÍDA
+        st.markdown(f"**⚠️ Avarias já
