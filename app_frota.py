@@ -5,7 +5,7 @@ import os
 
 # Configuração da página
 st.set_page_config(page_title="Gestão de Frota", page_icon="🚗")
-st.title("🚗 Controlo de Frota - Checklist")
+st.title("🚗 Controlo de Frota com Memória")
 
 # 1. Lista de Veículos
 veiculos_dados = {
@@ -23,12 +23,22 @@ mapa_pecas = [
     "14. Tampa do Porta-malas", "15. Lanterna Traseira"
 ]
 
-arquivo_dados = "historico_frota_v4.csv"
+arquivo_dados = "historico_frota_v5.csv"
 
-# Criar o arquivo se não existir
+# Inicializar arquivo
 if not os.path.exists(arquivo_dados):
-    df_init = pd.DataFrame(columns=["Data", "Ação", "Veículo", "Usuário", "KM", "Avarias", "Observações"])
-    df_init.to_csv(arquivo_dados, index=False)
+    pd.DataFrame(columns=["Data", "Ação", "Veículo", "Usuário", "KM", "Avarias", "Observações"]).to_csv(arquivo_dados, index=False)
+
+# Função para buscar a última avaria registrada do veículo
+def buscar_ultima_avaria(veiculo):
+    if os.path.exists(arquivo_dados):
+        df = pd.read_csv(arquivo_dados)
+        filtro = df[df['Veículo'] == veiculo]
+        if not filtro.empty:
+            ultima_avaria = filtro.iloc[-1]['Avarias']
+            if ultima_avaria and ultima_avaria != "Nenhuma":
+                return [a.strip() for a in ultima_avaria.split(",")]
+    return []
 
 tab1, tab2, tab3 = st.tabs(["📤 Saída", "📥 Chegada", "📋 Histórico"])
 
@@ -36,25 +46,27 @@ tab1, tab2, tab3 = st.tabs(["📤 Saída", "📥 Chegada", "📋 Histórico"])
 with tab1:
     st.header("Registar Saída")
     v_s = st.selectbox("Veículo", lista_exibicao, key="vs")
+    
+    # Busca automática do estado atual
+    avarias_anteriores = buscar_ultima_avaria(v_s)
+    
     n_s = st.text_input("Motorista", key="ns")
     km_s = st.number_input("KM Inicial", min_value=0, step=1, key="ks")
-    av_s = st.multiselect("Avarias identificadas na saída (1-15):", mapa_pecas, key="as")
+    
+    # O multiselect já começa com o que o carro tinha antes
+    av_s = st.multiselect("Estado do veículo na saída (Confirme ou adicione):", 
+                          mapa_pecas, default=avarias_anteriores, key="as")
+    
     obs_s = st.text_area("Observações de saída:", key="os")
     
     if st.button("Confirmar Saída"):
         if n_s:
-            # Correção do Bug: Usando pd.concat em vez de append
             nova_linha = pd.DataFrame([{
                 "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                "Ação": "SAÍDA",
-                "Veículo": v_s,
-                "Usuário": n_s,
-                "KM": km_s,
-                "Avarias": ", ".join(av_s) if av_s else "Nenhuma",
-                "Observações": obs_s
+                "Ação": "SAÍDA", "Veículo": v_s, "Usuário": n_s, "KM": km_s,
+                "Avarias": ", ".join(av_s) if av_s else "Nenhuma", "Observações": obs_s
             }])
-            df = pd.read_csv(arquivo_dados)
-            df = pd.concat([df, nova_linha], ignore_index=True)
+            df = pd.concat([pd.read_csv(arquivo_dados), nova_linha], ignore_index=True)
             df.to_csv(arquivo_dados, index=False)
             st.success("Saída registada!")
             st.rerun()
@@ -65,32 +77,31 @@ with tab1:
 with tab2:
     st.header("Registar Chegada")
     v_d = st.selectbox("Veículo", lista_exibicao, key="vd")
+    
+    # Busca automática do que foi marcado na saída
+    avarias_na_saida = buscar_ultima_avaria(v_d)
+    
     km_d = st.number_input("KM Final", min_value=0, step=1, key="kd")
-    av_d = st.multiselect("Novas avarias na chegada (1-15):", mapa_pecas, key="ad")
+    
+    # Traz as avarias da saída e permite adicionar novas
+    av_d = st.multiselect("Estado do veículo na chegada (Relate novos danos se houver):", 
+                          mapa_pecas, default=avarias_na_saida, key="ad")
+    
     obs_d = st.text_area("Observações de chegada:", key="od")
     
     if st.button("Confirmar Chegada"):
         nova_linha = pd.DataFrame([{
             "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-            "Ação": "CHEGADA",
-            "Veículo": v_d,
-            "Usuário": "N/A",
-            "KM": km_d,
-            "Avarias": ", ".join(av_d) if av_d else "Nenhuma",
-            "Observações": obs_d
+            "Ação": "CHEGADA", "Veículo": v_d, "Usuário": "N/A", "KM": km_d,
+            "Avarias": ", ".join(av_d) if av_d else "Nenhuma", "Observações": obs_d
         }])
-        df = pd.read_csv(arquivo_dados)
-        df = pd.concat([df, nova_linha], ignore_index=True)
+        df = pd.concat([pd.read_csv(arquivo_dados), nova_linha], ignore_index=True)
         df.to_csv(arquivo_dados, index=False)
         st.success("Chegada registada!")
         st.rerun()
 
 # --- ABA DE HISTÓRICO ---
 with tab3:
-    st.header("Histórico de Registos")
+    st.header("Auditoria")
     if os.path.exists(arquivo_dados):
-        df_hist = pd.read_csv(arquivo_dados)
-        st.dataframe(df_hist)
-        # Download para Auditoria (Passo 6)
-        csv = df_hist.to_csv(index=False).encode('utf-8')
-        st.download_button("Baixar CSV", data=csv, file_name="frota.csv", mime="text/csv")
+        st.dataframe(pd.read_csv(arquivo_dados))
