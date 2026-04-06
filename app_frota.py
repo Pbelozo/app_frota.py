@@ -4,130 +4,153 @@ from datetime import datetime, date, timedelta
 import os
 
 st.set_page_config(page_title="Frota Empresa", page_icon="🚗", layout="wide")
-st.title("🚗 Gestão de Frota - Oficial V28")
+st.title("🚗 Gestão de Frota - Oficial V29")
 
-# --- CONFIGURAÇÃO DA FROTA E REVISÕES ---
-# Definimos a quilometragem da última revisão e a periodicidade
-carros_config = {
-    "Prisma": {"placa": "FNZ6B39", "revisao_km": 50000, "revisao_data": date(2024, 12, 20), "intervalo_km": 10000},
-    "UP": {"placa": "GCP3490", "revisao_km": 30000, "revisao_data": date(2025, 1, 15), "intervalo_km": 10000},
-    "Saveiro": {"placa": "SUO3J14", "revisao_km": 45000, "revisao_data": date(2024, 11, 10), "intervalo_km": 10000},
-    "Strada": {"placa": "TEQ3I82", "revisao_km": 15000, "revisao_data": date(2025, 5, 20), "intervalo_km": 10000},
-    "Onix": {"placa": "FPQ7B62", "revisao_km": 20000, "revisao_data": date(2025, 3, 1), "intervalo_km": 10000}
-}
-lista_v = [n + " (" + c["placa"] + ")" for n, c in carros_config.items()]
+# --- ARQUIVOS DE BANCO DE DATA ---
+ARQ_HIST = "gestao_frota_oficial.csv"
+ARQ_VEIC = "cadastro_veiculos.csv"
+ARQ_MOT  = "cadastro_motoristas.csv"
 
-pecas = ["1. Paralama dianteiro esquerdo", "2. Paralama dianteiro direito", "3. Párachoque dianteiro", "4. Capô", "5. Parabrisa", "6. Teto", "7. Porta dianteiro direito", "8. Porta traseira direito", "9. Porta dianteiro esquerdo", "10. Porta traseira esquerdo", "11. Paralama traseiro esquerdo", "12. Paralama traseiro direito", "13. Vidro traseiro", "14. Párachoque traseiro", "15. Pane mecânica / elétrica"]
+# --- INICIALIZAÇÃO DE ARQUIVOS ---
+for arq, cols in [
+    (ARQ_HIST, ["Data", "Ação", "Veículo", "Usuário", "KM", "CNH", "Av_Saida", "Av_Chegada", "Av_Totais", "Obs", "Foto"]),
+    (ARQ_VEIC, ["Veículo", "Placa", "Ult_Revisao_KM", "Ult_Revisao_Data", "Intervalo_KM"]),
+    (ARQ_MOT,  ["Nome", "Validade_CNH"])
+]:
+    if not os.path.exists(arq):
+        pd.DataFrame(columns=cols).to_csv(arq, index=False)
 
-arq = "gestao_frota_oficial.csv"
+# --- FUNÇÕES DE APOIO ---
+def carregar_dados(arq):
+    return pd.read_csv(arq).fillna("").replace(["None", "nan"], "")
 
-if not os.path.exists(arq):
-    cols = ["Data", "Ação", "Veículo", "Usuário", "KM", "CNH", "Av_Saida", "Av_Chegada", "Av_Totais", "Obs", "Foto"]
-    pd.DataFrame(columns=cols).to_csv(arq, index=False)
+def get_status_veiculo(v_alvo):
+    if os.path.exists(ARQ_HIST):
+        df = pd.read_csv(ARQ_HIST)
+        df_v = df[df['Veículo'] == v_alvo]
+        if not df_v.empty:
+            ult = df_v.iloc[-1]
+            return {"acao": ult['Ação'], "user": ult['Usuário'], "km": int(ult['KM']), "av": str(ult['Av_Totais'])}
+    
+    # Se não tem histórico, busca KM inicial do cadastro
+    df_c = pd.read_csv(ARQ_VEIC)
+    carro_c = df_c[df_c['Veículo'] + " (" + df_c['Placa'] + ")" == v_alvo]
+    km_ini = int(carro_c.iloc[0]['Ult_Revisao_KM']) if not carro_c.empty else 0
+    return {"acao": "CHEGADA", "user": "Ninguém", "km": km_ini, "av": "Nenhuma"}
 
-def get_status(v_alvo):
-    nome_carro = v_alvo.split(" ")[0]
-    if os.path.exists(arq):
-        try:
-            df = pd.read_csv(arq)
-            df_v = df[df['Veículo'] == v_alvo]
-            if not df_v.empty:
-                ult = df_v.iloc[-1]
-                return {"acao": ult['Ação'], "user": ult['Usuário'], "km": int(ult['KM']), "av": str(ult['Av_Totais']) if pd.notna(ult['Av_Totais']) else "Nenhuma"}
-        except: pass
-    return {"acao": "CHEGADA", "user": "Ninguém", "km": carros_config[nome_carro]["revisao_km"], "av": "Nenhuma"}
+# --- INTERFACE ---
+tabs = st.tabs(["📤 Saída", "📥 Chegada", "🔧 Manutenção", "⚙️ Gestão & Cadastro", "📋 Histórico"])
 
-t1, t2, t3, t4 = st.tabs(["📤 Saída", "📥 Chegada", "🔧 Manutenção", "📋 Histórico"])
+# --- ABA: GESTÃO & CADASTRO ---
+with tabs[3]:
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("➕ Cadastrar Veículo")
+        with st.form("form_veiculo"):
+            v_nome = st.text_input("Modelo (ex: Prisma)")
+            v_placa = st.text_input("Placa")
+            v_km_rev = st.number_input("KM da Última Revisão", min_value=0, step=1)
+            v_dt_rev = st.date_input("Data da Última Revisão")
+            v_int_km = st.number_input("Intervalo para Revisão (KM)", value=10000)
+            if st.form_submit_button("Salvar Veículo"):
+                novo_v = pd.DataFrame([{"Veículo": v_nome, "Placa": v_placa, "Ult_Revisao_KM": v_km_rev, "Ult_Revisao_Data": v_dt_rev, "Intervalo_KM": v_int_km}])
+                pd.concat([pd.read_csv(ARQ_VEIC), novo_v], ignore_index=True).to_csv(ARQ_VEIC, index=False)
+                st.success("Veículo Cadastrado!")
+                st.rerun()
 
-# --- ABA 1: SAÍDA COM ALERTAS DE REVISÃO E FOTO ---
-with t1:
+    with col2:
+        st.subheader("👤 Cadastrar Motorista")
+        with st.form("form_motorista"):
+            m_nome = st.text_input("Nome Completo")
+            m_cnh = st.date_input("Validade da CNH")
+            if st.form_submit_button("Salvar Motorista"):
+                novo_m = pd.DataFrame([{"Nome": m_nome, "Validade_CNH": m_cnh}])
+                pd.concat([pd.read_csv(ARQ_MOT), novo_m], ignore_index=True).to_csv(ARQ_MOT, index=False)
+                st.success("Motorista Cadastrado!")
+                st.rerun()
+
+    st.divider()
+    st.write("### 📜 Frota Cadastrada")
+    st.dataframe(carregar_dados(ARQ_VEIC), use_container_width=True)
+    st.write("### 📜 Motoristas Autorizados")
+    st.dataframe(carregar_dados(ARQ_MOT), use_container_width=True)
+
+# --- ABA: SAÍDA ---
+with tabs[0]:
     st.header("Registar Saída")
-    v_s = st.selectbox("Selecione o Veículo", lista_v, key="vs")
-    st_s = get_status(v_s)
+    df_v_cad = carregar_dados(ARQ_VEIC)
+    df_m_cad = carregar_dados(ARQ_MOT)
     
-    # Lógica de Alerta de Revisão
-    nome_c = v_s.split(" ")[0]
-    conf = carros_config[nome_c]
-    prox_km = conf["revisao_km"] + conf["intervalo_km"]
-    prox_data = conf["revisao_data"] + timedelta(days=365)
-    
-    km_restante = prox_km - st_s["km"]
-    dias_restante = (prox_data - date.today()).days
-
-    if km_restante <= 500 or dias_restante <= 30:
-        st.warning(f"⚠️ PROXIMA REVISÃO: {prox_km} KM ou em {prox_data.strftime('%d/%m/%Y')}")
-        if km_restante <= 0 or dias_restante <= 0:
-            st.error("🚨 ATENÇÃO: PRAZO DE REVISÃO VENCIDO!")
-
-    if st_s["acao"] == "SAÍDA":
-        st.error(f"🚫 BLOQUEADO: Veículo com {st_s['user']}")
+    if df_v_cad.empty or df_m_cad.empty:
+        st.warning("⚠️ Cadastre veículos e motoristas na aba 'Gestão' antes de operar.")
     else:
-        val_cnh = st.date_input("Validade CNH", value=date.today(), key="cnh")
-        if val_cnh < date.today():
-            st.error("❌ CNH Vencida.")
+        opcoes_v = [row['Veículo'] + " (" + row['Placa'] + ")" for _, row in df_v_cad.iterrows()]
+        v_sel = st.selectbox("Veículo", opcoes_v, key="sel_v_s")
+        st_s = get_status_veiculo(v_sel)
+        
+        # Alerta Revisão
+        v_info = df_v_cad[df_v_cad['Placa'] == v_sel.split("(")[1].replace(")", "")].iloc[0]
+        prox_km = int(v_info['Ult_Revisao_KM']) + int(v_info['Intervalo_KM'])
+        if st_s["km"] >= (prox_km - 500):
+            st.error(f"🚨 REVISÃO NECESSÁRIA! Próxima com: {prox_km} KM (Atual: {st_s['km']})")
+
+        if st_s["acao"] == "SAÍDA":
+            st.error(f"🚫 Veículo em uso por {st_s['user']}")
         else:
-            n_s = st.text_input("Motorista", key="ns")
-            km_s = st.number_input("KM Inicial", min_value=st_s['km'], value=st_s['km'], step=1)
+            m_sel = st.selectbox("Motorista", df_m_cad['Nome'].tolist())
+            m_info = df_m_cad[df_m_cad['Nome'] == m_sel].iloc[0]
+            val_cnh = datetime.strptime(str(m_info['Validade_CNH']), '%Y-%m-%d').date()
             
-            limpo = st_s['av'].replace(' | ', ',').replace('|', ',')
-            d_av = [x.strip() for x in limpo.split(',')] if st_s['av'] != "Nenhuma" else []
-            av_s = st.multiselect("Checklist Saída:", pecas, default=[x for x in d_av if x in pecas])
-            
-            foto_s = st.file_uploader("Foto do Veículo (Saída)", type=["jpg", "png", "jpeg"], key="f_sai")
-            if foto_s: st.image(foto_s, caption="Preview Saída", width=300)
-            
-            ob_s = st.text_area("Observações:", key="os")
-            
-            if st.button("Confirmar Saída"):
-                if n_s:
-                    txt_av = ", ".join(av_s) if av_s else "Nenhuma"
-                    tem_foto = "Sim" if foto_s else "Não"
-                    nova = pd.DataFrame([{"Data": datetime.now().strftime("%d/%m/%Y %H:%M"), "Ação": "SAÍDA", "Veículo": v_s, "Usuário": n_s, "KM": km_s, "CNH": val_cnh.strftime("%d/%m/%Y"), "Av_Saida": txt_av, "Av_Chegada": "Pendente", "Av_Totais": txt_av, "Obs": ob_s, "Foto": tem_foto}])
-                    pd.concat([pd.read_csv(arq), nova], ignore_index=True).to_csv(arq, index=False)
-                    st.success("Saída Registada!"); st.rerun()
+            if val_cnh < date.today():
+                st.error(f"❌ BLOQUEADO: CNH de {m_sel} vencida em {val_cnh.strftime('%d/%m/%Y')}")
+            else:
+                st.success(f"✅ Motorista Autorizado (CNH ok). Último KM: {st_s['km']}")
+                km_s = st.number_input("KM Inicial", min_value=st_s['km'], value=st_s['km'])
+                
+                # Herança de avarias
+                pecas = ["1. Capô", "2. Parabrisa", "3. Parachoque", "4. Porta", "5. Teto"] # Resumido para exemplo
+                limpo = st_s['av'].replace('|', ',')
+                d_av = [x.strip() for x in limpo.split(',')] if st_s['av'] != "Nenhuma" else []
+                av_s = st.multiselect("Checklist Avarias:", pecas, default=[x for x in d_av if x in pecas])
+                
+                foto = st.file_uploader("Foto Saída", type=['jpg', 'png'])
+                if st.button("Confirmar Saída"):
+                    nova = pd.DataFrame([{"Data": datetime.now().strftime("%d/%m/%Y %H:%M"), "Ação": "SAÍDA", "Veículo": v_sel, "Usuário": m_sel, "KM": km_s, "CNH": val_cnh, "Av_Saida": ", ".join(av_s), "Av_Chegada": "Pendente", "Av_Totais": ", ".join(av_s), "Obs": "", "Foto": "Sim" if foto else "Não"}])
+                    pd.concat([pd.read_csv(ARQ_HIST), nova], ignore_index=True).to_csv(ARQ_HIST, index=False)
+                    st.success("Saída Registrada!"); st.rerun()
 
-# --- ABA 2: CHEGADA COM FOTO ---
-with t2:
+# --- ABA: CHEGADA ---
+with tabs[1]:
     st.header("Registar Chegada")
-    v_d = st.selectbox("Veículo", lista_v, key="vd")
-    st_d = get_status(v_d)
-    if st_d["acao"] != "SAÍDA": st.info("ℹ️ No pátio.")
+    opcoes_v = [row['Veículo'] + " (" + row['Placa'] + ")" for _, row in carregar_dados(ARQ_VEIC).iterrows()]
+    v_sel_d = st.selectbox("Veículo", opcoes_v, key="sel_v_d")
+    st_d = get_status_veiculo(v_sel_d)
+    
+    if st_d["acao"] != "SAÍDA":
+        st.info("ℹ️ Veículo no pátio.")
     else:
-        km_d = st.number_input("KM Final", min_value=st_d['km'], value=st_d['km'], step=1)
-        n_av = st.multiselect("Novas avarias:", pecas)
-        
-        foto_d = st.file_uploader("Foto do Veículo (Chegada)", type=["jpg", "png", "jpeg"], key="f_che")
-        if foto_d: st.image(foto_d, caption="Preview Chegada", width=300)
-        
+        km_d = st.number_input("KM Final", min_value=st_d['km'], value=st_d['km'])
         if st.button("Confirmar Chegada"):
-            txt_n = ", ".join(n_av) if n_av else "Nenhuma"
-            l_b = [st_d['av']] if st_d['av'] != "Nenhuma" else []
-            if txt_n != "Nenhuma": l_b.append(txt_n)
-            tem_foto = "Sim" if foto_d else "Não"
-            nova = pd.DataFrame([{"Data": datetime.now().strftime("%d/%m/%Y %H:%M"), "Ação": "CHEGADA", "Veículo": v_d, "Usuário": st_d['user'], "KM": km_d, "CNH": "", "Av_Saida": st_d['av'], "Av_Chegada": txt_n, "Av_Totais": " | ".join(l_b) if l_b else "Nenhuma", "Obs": "Retorno", "Foto": tem_foto}])
-            pd.concat([pd.read_csv(arq), nova], ignore_index=True).to_csv(arq, index=False)
-            st.success("Chegada Registada!"); st.rerun()
+            nova = pd.DataFrame([{"Data": datetime.now().strftime("%d/%m/%Y %H:%M"), "Ação": "CHEGADA", "Veículo": v_sel_d, "Usuário": st_d['user'], "KM": km_d, "CNH": "", "Av_Saida": st_d['av'], "Av_Chegada": "Nenhuma", "Av_Totais": st_d['av'], "Obs": "Retorno", "Foto": "Não"}])
+            pd.concat([pd.read_csv(ARQ_HIST), nova], ignore_index=True).to_csv(ARQ_HIST, index=False)
+            st.success("Chegada Registrada!"); st.rerun()
 
-# --- ABA 3: REPAROS ---
-with t3:
+# --- ABA: MANUTENÇÃO ---
+with tabs[2]:
     st.header("🔧 Reparos")
-    v_m = st.selectbox("Veículo", lista_v, key="vm")
-    st_m = get_status(v_m)
+    opcoes_v = [row['Veículo'] + " (" + row['Placa'] + ")" for _, row in carregar_dados(ARQ_VEIC).iterrows()]
+    v_sel_m = st.selectbox("Veículo", opcoes_v, key="sel_v_m")
+    st_m = get_status_veiculo(v_sel_m)
     if st_m["av"] == "Nenhuma": st.success("✅ Sem avarias.")
     else:
-        lista_at = [x.strip() for x in st_m['av'].replace('|', ',').split(',')]
-        reparados = st.multiselect("Itens consertados:", lista_at)
-        mec = st.text_input("Responsável", key="mec")
-        if st.button("Registar Reparo"):
-            if reparados and mec:
-                rest = [i for i in lista_at if i not in reparados]
-                nova = pd.DataFrame([{"Data": datetime.now().strftime("%d/%m/%Y %H:%M"), "Ação": "REPARO", "Veículo": v_m, "Usuário": mec, "KM": st_m["km"], "CNH": "", "Av_Saida": "Conserto: "+", ".join(reparados), "Av_Chegada": "", "Av_Totais": " | ".join(rest) if rest else "Nenhuma", "Obs": "Manutenção", "Foto": "N/A"}])
-                pd.concat([pd.read_csv(arq), nova], ignore_index=True).to_csv(arq, index=False)
-                st.success("Atualizado!"); st.rerun()
+        st.warning(f"Avarias: {st_m['av']}")
+        if st.button("Registrar Reparo Total"):
+            nova = pd.DataFrame([{"Data": datetime.now().strftime("%d/%m/%Y %H:%M"), "Ação": "REPARO", "Veículo": v_sel_m, "Usuário": "Manutenção", "KM": st_m["km"], "CNH": "", "Av_Saida": "Conserto Geral", "Av_Chegada": "", "Av_Totais": "Nenhuma", "Obs": "Reparo", "Foto": ""}])
+            pd.concat([pd.read_csv(ARQ_HIST), nova], ignore_index=True).to_csv(ARQ_HIST, index=False)
+            st.success("Veículo Reparado!"); st.rerun()
 
-# --- ABA 4: HISTÓRICO ---
-with t4:
-    st.header("📋 Histórico")
-    if os.path.exists(arq):
-        dfv = pd.read_csv(arq).fillna("").replace(["None", "nan"], "")
-        st.dataframe(dfv, use_container_width=True)
+# --- ABA: HISTÓRICO ---
+with tabs[4]:
+    st.header("📋 Histórico Geral")
+    st.dataframe(carregar_dados(ARQ_HIST), use_container_width=True)
