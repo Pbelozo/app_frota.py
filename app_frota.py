@@ -17,14 +17,21 @@ if not os.path.exists(arq):
     cols = ["Data", "Ação", "Veículo", "Usuário", "KM", "CNH", "Av_Saida", "Av_Chegada", "Av_Totais", "Obs"]
     pd.DataFrame(columns=cols).to_csv(arq, index=False)
 
+# --- FUNÇÃO ATUALIZADA PARA CONSIDERAR REPAROS ---
 def get_status(v_alvo):
     if os.path.exists(arq):
         try:
             df = pd.read_csv(arq)
             df_v = df[df['Veículo'] == v_alvo]
             if not df_v.empty:
-                u = df_v.iloc[-1]
-                return {"acao": u['Ação'], "user": u['Usuário'], "km": int(u['KM']), "av": str(u['Av_Totais'])}
+                ult = df_v.iloc[-1]
+                # Retorna os dados da última linha, seja ela REPARO ou CHEGADA
+                return {
+                    "acao": ult['Ação'],
+                    "user": ult['Usuário'],
+                    "km": int(ult['KM']),
+                    "av": str(ult['Av_Totais'])
+                }
         except: pass
     return {"acao": "CHEGADA", "user": "Ninguém", "km": 0, "av": "Nenhuma"}
 
@@ -34,6 +41,8 @@ with t1:
     st.header("Registar Saída")
     v_s = st.selectbox("Selecione o Veículo", lista_v, key="vs")
     st_s = get_status(v_s)
+    
+    # Se a última ação foi SAÍDA, bloqueia. Se foi REPARO ou CHEGADA, permite.
     if st_s["acao"] == "SAÍDA":
         st.error("🚫 BLOQUEADO: Veículo em uso por " + str(st_s["user"]))
     else:
@@ -41,15 +50,21 @@ with t1:
         if val_cnh < date.today():
             st.error("❌ CNH Vencida. Saída bloqueada.")
         else:
-            st.success("✅ Último KM: " + str(st_s["km"]))
+            st.success("✅ Último KM registado: " + str(st_s["km"]))
+            st.info("🔍 Avarias atuais em sistema: " + st_s["av"])
+            
             n_s = st.text_input("Nome do Motorista", key="ns")
             km_s = st.number_input("KM Inicial", min_value=st_s['km'], value=st_s['km'], step=1, key="ks")
+            
+            # Lógica para pré-selecionar apenas o que sobrou após reparos
             d_av = []
             if st_s['av'] != "Nenhuma":
                 itens = [x.strip() for x in st_s['av'].replace('|', ',').split(',')]
                 d_av = [x for x in itens if x in pecas]
-            av_s = st.multiselect("Checklist de Avarias:", pecas, default=d_av, key="as")
+            
+            av_s = st.multiselect("Checklist de Avarias (Confirmar Estado):", pecas, default=d_av, key="as")
             ob_s = st.text_area("Observações:", key="os")
+            
             if st.button("Confirmar Saída"):
                 if n_s:
                     txt_av = ", ".join(av_s) if av_s else "Nenhuma"
@@ -61,23 +76,21 @@ with t1:
 
 with t2:
     st.header("Registar Chegada")
-    v_d = st.selectbox("Selecione o Veículo", lista_v, key="vd")
+    v_d = st.selectbox("Veículo", lista_v, key="vd")
     st_d = get_status(v_d)
-    if st_d["acao"] == "CHEGADA":
-        st.info("ℹ️ Veículo no pátio.")
+    if st_d["acao"] != "SAÍDA":
+        st.info("ℹ️ Veículo disponível no pátio ou em manutenção.")
     else:
         st.warning("👤 Motorista: " + str(st_d["user"]))
-        # Linha corrigida e encurtada para não quebrar:
         km_d = st.number_input("KM Final", min_value=st_d['km'], value=st_d['km'], step=1, key="kd")
         st.write("**Avarias na saída:** " + st_d["av"])
-        n_av = st.multiselect("Novas avarias:", pecas, key="ad")
-        ob_d = st.text_area("Obs. Chegada:", key="od")
+        n_av = st.multiselect("Novas avarias detectadas:", pecas, key="ad")
         if st.button("Confirmar Chegada"):
             txt_n = ", ".join(n_av) if n_av else "Nenhuma"
             l_t = [st_d['av']] if st_d['av'] != "Nenhuma" else []
             if txt_n != "Nenhuma": l_t.append(txt_n)
             av_f = " | ".join(l_t) if l_t else "Nenhuma"
-            nova_l = pd.DataFrame([{"Data": datetime.now().strftime("%d/%m/%Y %H:%M"), "Ação": "CHEGADA", "Veículo": v_d, "Usuário": st_d['user'], "KM": km_d, "CNH": "N/A", "Av_Saida": st_d['av'], "Av_Chegada": txt_n, "Av_Totais": av_f, "Obs": ob_d}])
+            nova_l = pd.DataFrame([{"Data": datetime.now().strftime("%d/%m/%Y %H:%M"), "Ação": "CHEGADA", "Veículo": v_d, "Usuário": st_d['user'], "KM": km_d, "CNH": "N/A", "Av_Saida": st_d['av'], "Av_Chegada": txt_n, "Av_Totais": av_f, "Obs": "Retorno ao pátio"}])
             pd.concat([pd.read_csv(arq), nova_l], ignore_index=True).to_csv(arq, index=False)
             st.success("Chegada registada!")
             st.rerun()
@@ -87,26 +100,22 @@ with t3:
     v_m = st.selectbox("Veículo para Manutenção", lista_v, key="vm")
     st_m = get_status(v_m)
     if st_m["av"] == "Nenhuma":
-        st.success("✅ Sem avarias.")
+        st.success("✅ Sem avarias pendentes.")
     else:
-        st.warning("⚠️ Itens: " + st_m["av"])
+        st.warning("⚠️ Avarias Atuais: " + st_m["av"])
         lista_at = [x.strip() for x in st_m['av'].replace('|', ',').split(',')]
         reparados = st.multiselect("Itens consertados:", lista_at, key="reparo")
-        mec = st.text_input("Responsável", key="mec")
+        mec = st.text_input("Responsável/Oficina", key="mec")
         if st.button("Registar Reparo"):
             if reparados and mec:
                 rest = [i for i in lista_at if i not in reparados]
-                n_av = " | ".join(rest) if rest else "Nenhuma"
-                nova_l = pd.DataFrame([{"Data": datetime.now().strftime("%d/%m/%Y %H:%M"), "Ação": "REPARO", "Veículo": v_m, "Usuário": mec, "KM": st_m["km"], "CNH": "N/A", "Av_Saida": "Reparo: " + ", ".join(reparados), "Av_Totais": n_av, "Obs": "Manutenção"}])
+                n_av_totais = " | ".join(rest) if rest else "Nenhuma"
+                nova_l = pd.DataFrame([{"Data": datetime.now().strftime("%d/%m/%Y %H:%M"), "Ação": "REPARO", "Veículo": v_m, "Usuário": mec, "KM": st_m["km"], "CNH": "N/A", "Av_Saida": "Conserto: " + ", ".join(reparados), "Av_Chegada": "N/A", "Av_Totais": n_av_totais, "Obs": "Avarias removidas do checklist"}])
                 pd.concat([pd.read_csv(arq), nova_l], ignore_index=True).to_csv(arq, index=False)
-                st.success("Atualizado!")
+                st.success("Histórico limpo com sucesso!")
                 st.rerun()
 
 with t4:
     st.header("📋 Histórico")
     if os.path.exists(arq):
-        df_hist = pd.read_csv(arq)
-        if not df_hist.empty:
-            st.dataframe(df_hist, use_container_width=True)
-        else:
-            st.write("Aguardando registros...")
+        st.dataframe(pd.read_csv(arq), use_container_width=True)
