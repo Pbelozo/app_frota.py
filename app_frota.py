@@ -58,5 +58,5 @@ with tab2:
 with tab3:
     st.header("Auditoria")
     if os.path.exists(arquivo_dados):
-        df_hist = pd.read_csv(arquivo_dados)
-        st.dataframe(df_hist)
+        df = pd.read_csv(arquivo_dados)
+        st.dataframe(df)
