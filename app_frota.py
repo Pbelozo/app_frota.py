@@ -23,7 +23,7 @@ mapa_pecas = [
     "14. Tampa do Porta-malas", "15. Lanterna Traseira"
 ]
 
-arquivo_dados = "historico_frota_v10.csv"
+arquivo_dados = "historico_frota_v11.csv"
 
 if not os.path.exists(arquivo_dados):
     cols = ["Data", "Ação", "Veículo", "Usuário", "KM", "Avarias_Saida", "Novas_Avarias_Chegada", "Avarias_Totais", "Observações"]
@@ -35,7 +35,6 @@ def verificar_status_veiculo(veiculo):
         filtro = df[df['Veículo'] == veiculo]
         if not filtro.empty:
             ultimo = filtro.iloc[-1]
-            # Se for SAÍDA, buscamos as avarias que ele registrou na saída
             av_saida_str = str(ultimo['Avarias_Saida'])
             return {
                 "acao": ultimo['Ação'],
@@ -66,21 +65,4 @@ with tab1:
                     "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
                     "Ação": "SAÍDA", "Veículo": v_s, "Usuário": n_s, "KM": km_s,
                     "Avarias_Saida": txt_av_s, "Novas_Avarias_Chegada": "N/A",
-                    "Avarias_Totais": txt_av_s, "Observações": obs_s
-                }])
-                df_f = pd.concat([pd.read_csv(arquivo_dados), nova_l], ignore_index=True)
-                df_f.to_csv(arquivo_dados, index=False)
-                st.success("Saída registada!")
-                st.rerun()
-
-with tab2:
-    st.header("Registar Chegada")
-    v_d = st.selectbox("Veículo", lista_exibicao, key="vd")
-    status_d = verificar_status_veiculo(v_d)
-    
-    if status_d["acao"] == "CHEGADA":
-        st.info("ℹ️ Veículo disponível no pátio.")
-    else:
-        st.warning(f"👤 Motorista: **{status_d['motorista']}**")
-        # EXIBIÇÃO BLOQUEADA DAS AVARIAS DA SAÍDA
-        st.markdown(f"**⚠️ Avarias já
+                    "Avarias_Totais": txt_av_
