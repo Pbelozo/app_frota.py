@@ -3,84 +3,95 @@ import pandas as pd
 from datetime import datetime
 import os
 
-# Configuração da página
-st.set_page_config(page_title="Frota Empresa", page_icon="🚗")
-st.title("🚗 Gestão de Frota - Checklist Completo")
+# Configuração
+st.set_page_config(page_title="Gestão de Frota", page_icon="🚗")
+st.title("🚗 Sistema de Memória de Frota")
 
-# 1. Lista de Veículos Atualizada
+# 1. Dados dos Veículos
 veiculos_dados = {
-    "Prisma": "FNZ6B39",
-    "UP": "GCP3490",
-    "Saveiro": "SUO3J14",
-    "Strada": "TEQ3I82",
-    "Onix": "FPQ7B62"
+    "Prisma": "FNZ6B39", "UP": "GCP3490", "Saveiro": "SUO3J14",
+    "Strada": "TEQ3I82", "Onix": "FPQ7B62"
 }
-lista_exibicao = [f"{nome} ({placa})" for nome, placa in veiculos_dados.items()]
+lista_exibicao = [f"{n} ({p})" for n, p in veiculos_dados.items()]
 
-# 2. Lista de Avarias (Mapa 1 a 15)
+# 2. Mapa de Peças com Código 0
 mapa_pecas = [
-    "Nenhuma (Veículo OK)", "1. Párachoques Dianteiro", "2. Farol Esquerdo", "3. Farol Direito",
-    "4. Capô", "5. Para-brisa", "6. Teto", "7. Porta Dianteira Esq.",
+    "0. Veículo Reparado / Sem Avarias", "1. Párachoques Dianteiro", "2. Farol Esquerdo", 
+    "3. Farol Direito", "4. Capô", "5. Para-brisa", "6. Teto", "7. Porta Dianteira Esq.",
     "8. Porta Traseira Esq.", "9. Porta Dianteira Dir.", "10. Porta Traseira Dir.",
     "11. Lateral Traseira Esq.", "12. Lateral Traseira Dir.", "13. Párachoques Traseiro",
     "14. Tampa do Porta-malas", "15. Lanterna Traseira"
 ]
 
-arquivo_dados = "historico_frota_final.csv"
+# Arquivos de Dados
+arq_historico = "historico_geral.csv"
+arq_estado_atual = "estado_atual_veiculos.csv"
 
-if not os.path.exists(arquivo_dados):
-    df_init = pd.DataFrame(columns=["Data", "Ação", "Veículo", "Usuário", "KM", "Estado_Veiculo", "Observações"])
-    df_init.to_csv(arquivo_dados, index=False)
+# Inicializar arquivos se não existirem
+if not os.path.exists(arq_estado_atual):
+    df_estado = pd.DataFrame({"Veículo": lista_exibicao, "Avarias_Atuais": "Sem Avarias"})
+    df_estado.to_csv(arq_estado_atual, index=False)
 
-tab1, tab2, tab3 = st.tabs(["📤 Retirada (Checklist Inicial)", "📥 Devolução (Checklist Final)", "📋 Auditoria"])
+if not os.path.exists(arq_historico):
+    pd.DataFrame(columns=["Data", "Ação", "Veículo", "Usuário", "KM", "Danos_Registrados"]).to_csv(arq_historico, index=False)
 
-# --- ABA DE RETIRADA (Passo 1 e 8) ---
+def atualizar_estado_fixo(veiculo, novos_danos):
+    df_est = pd.read_csv(arq_estado_atual)
+    # Se selecionar Código 0, limpa tudo
+    if "0. Veículo Reparado / Sem Avarias" in novos_danos:
+        danos_finais = "Sem Avarias"
+    else:
+        # Pega o que já tinha e soma o novo (removendo duplicados)
+        estado_antigo = df_est.loc[df_est['Veículo'] == veiculo, 'Avarias_Atuais'].values[0]
+        lista_antiga = [] if estado_antigo == "Sem Avarias" else estado_antigo.split(" | ")
+        danos_finais = " | ".join(sorted(list(set(lista_antiga + novos_danos))))
+    
+    df_est.loc[df_est['Veículo'] == veiculo, 'Avarias_Atuais'] = danos_finais
+    df_est.to_csv(arq_estado_atual, index=False)
+
+tab1, tab2, tab3 = st.tabs(["📤 Saída", "📥 Chegada", "📋 Auditoria"])
+
+# --- FUNÇÃO PARA MOSTRAR ESTADO ATUAL ---
+def mostrar_status(v):
+    df_est = pd.read_csv(arq_estado_atual)
+    status = df_est.loc[df_est['Veículo'] == v, 'Avarias_Atuais'].values[0]
+    st.warning(f"**Estado Atual do {v}:** {status}")
+
 with tab1:
     st.header("Checklist de Saída")
-    veiculo_s = st.selectbox("Selecione o Veículo", lista_exibicao, key="sel_s")
-    nome_s = st.text_input("Nome do Motorista", key="nom_s")
-    km_s = st.number_input("KM Inicial", min_value=0, step=1, key="km_s")
+    v_s = st.selectbox("Selecione o Veículo", lista_exibicao, key="vs")
+    mostrar_status(v_s) # Campo logo abaixo do veículo
     
-    st.subheader("🔍 Estado Inicial do Veículo")
-    avaria_s = st.multiselect("Se houver danos prévios, selecione as posições (1-15):", mapa_pecas, key="ava_s")
-    obs_s = st.text_area("Observações de saída:", key="obs_s")
+    n_s = st.text_input("Motorista", key="ns")
+    km_s = st.number_input("KM Inicial", min_value=0, key="ks")
+    novas_av_s = st.multiselect("Registrar NOVOS danos na saída:", mapa_pecas, key="as")
     
-    if st.button("Confirmar Saída e Gerar Registro"):
-        if nome_s:
-            estado = ", ".join(avaria_s) if avaria_s else "Nenhum dano"
-            nova_linha = [datetime.now().strftime("%d/%m/%Y %H:%M"), "SAÍDA", veiculo_s, nome_s, km_s, estado, obs_s]
-            df = pd.read_csv(arquivo_dados)
-            df.loc[len(df)] = nova_linha
-            df.to_csv(arquivo_dados, index=False)
-            st.success(f"Saída do {veiculo_s} autorizada para {nome_s}!")
-        else:
-            st.error("O nome do motorista é obrigatório.")
+    if st.button("Confirmar Saída"):
+        if n_s:
+            atualizar_estado_fixo(v_s, novas_av_s)
+            nova_l = [datetime.now().strftime("%d/%m/%Y %H:%M"), "SAÍDA", v_s, n_s, km_s, ", ".join(novas_av_s) if novas_av_s else "Nenhum"]
+            pd.read_csv(arq_historico).append(pd.Series(nova_l, index=pd.read_csv(arq_historico).columns), ignore_index=True).to_csv(arq_historico, index=False)
+            st.success("Saída Registrada!")
+            st.rerun()
 
-# --- ABA DE DEVOLUÇÃO (Passo 4 e 5) ---
 with tab2:
-    st.header("Checklist de Devolução")
-    veiculo_d = st.selectbox("Selecione o Veículo", lista_exibicao, key="sel_d")
-    km_d = st.number_input("KM Final", min_value=0, step=1, key="km_d")
+    st.header("Checklist de Chegada")
+    v_d = st.selectbox("Selecione o Veículo", lista_exibicao, key="vd")
+    mostrar_status(v_d) # Campo logo abaixo do veículo
     
-    st.subheader("🛠️ Reporte de Ocorrências no Uso")
-    avaria_d = st.multiselect("Se houver novos danos, selecione as posições:", mapa_pecas, key="ava_d")
-    obs_d = st.text_area("Descrição de avarias/limpeza/combustível:", key="obs_d")
-    foto = st.file_uploader("Anexar foto do dano (Obrigatório em caso de sinistro)", type=["jpg", "png", "jpeg"], key="foto_d")
+    km_d = st.number_input("KM Final", min_value=0, key="kd")
+    novas_av_d = st.multiselect("Registrar NOVOS danos na chegada:", mapa_pecas, key="ad")
     
     if st.button("Confirmar Devolução"):
-        estado_d = ", ".join(avaria_d) if avaria_d else "Sem novos danos"
-        status_foto = "COM FOTO" if foto else "SEM FOTO"
-        nova_linha = [datetime.now().strftime("%d/%m/%Y %H:%M"), "DEVOLUÇÃO", veiculo_d, "N/A", km_d, estado_d, f"{obs_d} ({status_foto})"]
-        df = pd.read_csv(arquivo_dados)
-        df.loc[len(df)] = nova_linha
-        df.to_csv(arquivo_dados, index=False)
-        st.success("Devolução registada! O veículo foi verificado.")
+        atualizar_estado_fixo(v_d, novas_av_d)
+        nova_l = [datetime.now().strftime("%d/%m/%Y %H:%M"), "DEVOLUÇÃO", v_d, "N/A", km_d, ", ".join(novas_av_d) if novas_av_d else "Nenhum"]
+        pd.read_csv(arq_historico).append(pd.Series(nova_l, index=pd.read_csv(arq_historico).columns), ignore_index=True).to_csv(arq_historico, index=False)
+        st.success("Devolução Registrada!")
+        st.rerun()
 
-# --- ABA DE AUDITORIA (Passo 6) ---
 with tab3:
-    st.header("Histórico de Uso e Avarias")
-    if os.path.exists(arquivo_dados):
-        df_log = pd.read_csv(arquivo_dados)
-        st.dataframe(df_log)
-        csv = df_log.to_csv(index=False).encode('utf-8')
-        st.download_button("Baixar Relatório para Auditoria", data=csv, file_name="auditoria_frota.csv", mime="text/csv")
+    st.header("Auditoria")
+    st.subheader("Situação Atual da Frota")
+    st.table(pd.read_csv(arq_estado_atual))
+    st.subheader("Histórico de Movimentações")
+    st.dataframe(pd.read_csv(arq_historico))
