@@ -48,16 +48,15 @@ with t1:
     st_s = get_status(v_s)
     
     if st_s["acao"] == "SAÍDA":
-        st.error(f"🚫 BLOQUEADO: O veículo está com {st_s['user']}.")
+        st.error("🚫 BLOQUEADO: O veículo está com " + st_s["user"])
     else:
-        # CORREÇÃO DA DATA:
         val_cnh = st.date_input("Validade da CNH", value=date.today(), key="cnh")
         
         if val_cnh < date.today():
             st.error("❌ MOTORISTA NÃO AUTORIZADO: CNH Vencida.")
         else:
-            st.success(f"✅ Último KM: {st_s['km']}")
-            st.info(f"🔍 Estado atual herdado: {st_s['av']}")
+            st.success("✅ Último KM registado: " + str(st_s["km"]))
+            st.info("🔍 Avarias atuais: " + st_s["av"])
             
             n_s = st.text_input("Motorista", key="ns")
             km_s = st.number_input("KM Inicial", min_value=st_s['km'], value=st_s['km'], step=1, key="ks")
@@ -94,6 +93,32 @@ with t2:
     if st_d["acao"] == "CHEGADA":
         st.info("ℹ️ Veículo no pátio.")
     else:
-        st.warning(f"👤 Motorista: {st_d['user']} | Saída KM: {st_d['km']}")
+        st.warning("👤 Motorista: " + st_d["user"] + " | KM Saída: " + str(st_d["km"]))
         km_d = st.number_input("KM Final", min_value=st_d['km'], value=st_d['km']+1, step=1, key="kd")
-        st.markdown(f"
+        
+        st.write("**⚠️ Avarias registadas na saída:**")
+        st.code(st_d["av"]) # Usando code block para evitar erros de markdown
+        
+        n_av = st.multiselect("Registrar NOVAS avarias:", pecas, key="ad")
+        ob_d = st.text_area("Observações de Chegada:", key="od")
+        
+        if st.button("Confirmar Chegada"):
+            txt_n = ", ".join(n_av) if n_av else "Nenhuma"
+            l_t = [st_d['av']] if st_d['av'] != "Nenhuma" else []
+            if txt_n != "Nenhuma": l_t.append(txt_n)
+            
+            nova_l = pd.DataFrame([{
+                "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                "Ação": "CHEGADA", "Veículo": v_d, "Usuário": st_d['user'], "KM": km_d,
+                "CNH": "N/A", "Av_Saida": st_d['av'], "Av_Chegada": txt_n,
+                "Av_Totais": " | ".join(l_t) if l_t else "Nenhuma", "Obs": ob_d
+            }])
+            df_all = pd.concat([pd.read_csv(arq), nova_l], ignore_index=True)
+            df_all.to_csv(arq, index=False)
+            st.success("Chegada registada!")
+            st.rerun()
+
+with t3:
+    st.header("Histórico")
+    if os.path.exists(arq):
+        st.dataframe(pd.read_csv(arq))
