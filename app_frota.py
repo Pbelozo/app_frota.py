@@ -5,9 +5,9 @@ import os
 
 # Configuração da página
 st.set_page_config(page_title="Frota Empresa", page_icon="🚗")
-st.title("🚗 Gestão de Frota - Auditoria Completa")
+st.title("🚗 Gestão de Frota - Auditoria Digital")
 
-# 1. Lista de Veículos
+# 1. Lista de Veículos Atualizada
 veiculos_dados = {
     "Prisma": "FNZ6B39", "UP": "GCP3490", "Saveiro": "SUO3J14",
     "Strada": "TEQ3I82", "Onix": "FPQ7B62"
@@ -23,25 +23,23 @@ mapa_pecas = [
     "14. Tampa do Porta-malas", "15. Lanterna Traseira"
 ]
 
-arquivo_dados = "historico_frota_v6.csv"
+arquivo_dados = "historico_frota_v7.csv"
 
-# Inicializar arquivo
+# Inicializar arquivo se não existir
 if not os.path.exists(arquivo_dados):
-    pd.DataFrame(columns=["Data", "Ação", "Veículo", "Usuário", "KM", "Avarias_Saida", "Avarias_Chegada", "Observações"]).to_csv(arquivo_dados, index=False)
+    df_init = pd.DataFrame(columns=["Data", "Ação", "Veículo", "Usuário", "KM", "Avarias_Saida", "Avarias_Chegada", "Observações"])
+    df_init.to_csv(arquivo_dados, index=False)
 
-# Função para buscar os dados da última saída em aberto
+# Função para buscar os dados da última saída
 def buscar_dados_saida(veiculo):
     if os.path.exists(arquivo_dados):
         df = pd.read_csv(arquivo_dados)
-        # Filtra apenas as saídas para este veículo
         filtro = df[(df['Veículo'] == veiculo) & (df['Ação'] == "SAÍDA")]
         if not filtro.empty:
-            ultimo_registo = filtro.iloc[-1]
-            return {
-                "motorista": ultimo_registo['Usuário'],
-                "avarias_saida": str(ultimo_registo['Avarias_Saida']).split(", ") if ultimo_registo['Avarias_Saida'] != "Nenhuma" else []
-            }
-    return {"motorista": "Não identificado", "avarias_saida": []}
+            ultimo = filtro.iloc[-1]
+            av_s = str(ultimo['Avarias_Saida']).split(", ") if ultimo['Avarias_Saida'] != "Nenhuma" else []
+            return {"motorista": ultimo['Usuário'], "avarias": av_s}
+    return {"motorista": "Não identificado", "avarias": []}
 
 tab1, tab2, tab3 = st.tabs(["📤 Saída", "📥 Chegada", "📋 Histórico"])
 
@@ -51,19 +49,20 @@ with tab1:
     v_s = st.selectbox("Veículo", lista_exibicao, key="vs")
     n_s = st.text_input("Motorista", key="ns")
     km_s = st.number_input("KM Inicial", min_value=0, step=1, key="ks")
-    av_s = st.multiselect("Avarias identificadas na saída:", mapa_pecas, key="as")
-    obs_s = st.text_area("Observações de saída:", key="os")
+    av_s = st.multiselect("Avarias na saída:", mapa_pecas, key="as")
+    obs_s = st.text_area("Observações:", key="os")
     
     if st.button("Confirmar Saída"):
         if n_s:
-            nova_linha = pd.DataFrame([{
+            nova_l = pd.DataFrame([{
                 "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
                 "Ação": "SAÍDA", "Veículo": v_s, "Usuário": n_s, "KM": km_s,
                 "Avarias_Saida": ", ".join(av_s) if av_s else "Nenhuma",
                 "Avarias_Chegada": "Pendente", "Observações": obs_s
             }])
-            df = pd.concat([pd.read_csv(arquivo_dados), nova_linha], ignore_index=True)
-            df.to_csv(arquivo_dados, index=False)
+            df_atual = pd.read_csv(arquivo_dados)
+            df_final = pd.concat([df_atual, nova_l], ignore_index=True) # CORREÇÃO DO BUG
+            df_final.to_csv(arquivo_dados, index=False)
             st.success("Saída registada!")
             st.rerun()
         else:
@@ -74,31 +73,30 @@ with tab2:
     st.header("Registar Chegada")
     v_d = st.selectbox("Veículo", lista_exibicao, key="vd")
     
-    # BUSCA AUTOMÁTICA DOS DADOS DA SAÍDA
-    dados_origem = buscar_dados_saida(v_d)
-    motorista_automatico = dados_origem["motorista"]
-    avarias_origem = dados_origem["avarias_saida"]
-    
-    st.info(f"👤 **Motorista Responsável:** {motorista_automatico}")
+    dados = buscar_dados_saida(v_d)
+    st.info(f"👤 **Motorista Responsável:** {dados['motorista']}")
     
     km_d = st.number_input("KM Final", min_value=0, step=1, key="kd")
-    
-    st.write("Estado do veículo (Marque se surgiram NOVOS danos):")
-    av_d = st.multiselect("Checklist de Chegada (Inclui danos de saída):", 
-                          mapa_pecas, default=avarias_origem, key="ad")
+    av_d = st.multiselect("Estado na chegada (Confirme os danos):", 
+                          mapa_pecas, default=dados['avarias'], key="ad")
     
     obs_d = st.text_area("Observações de chegada:", key="od")
     
     if st.button("Confirmar Chegada"):
-        nova_linha = pd.DataFrame([{
+        nova_l = pd.DataFrame([{
             "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-            "Ação": "CHEGADA", 
-            "Veículo": v_d, 
-            "Usuário": motorista_automatico, # PREENCHIMENTO AUTOMÁTICO
-            "KM": km_d,
-            "Avarias_Saida": ", ".join(avarias_origem) if avarias_origem else "Nenhuma",
-            "Avarias_Chegada": ", ".join(av_d) if av_d else "Nenhuma",
-            "Observações": obs_d
+            "Ação": "CHEGADA", "Veículo": v_d, "Usuário": dados['motorista'],
+            "KM": km_d, "Avarias_Saida": ", ".join(dados['avarias']) if dados['avarias'] else "Nenhuma",
+            "Avarias_Chegada": ", ".join(av_d) if av_d else "Nenhuma", "Observações": obs_d
         }])
-        df = pd.concat([pd.read_csv(arquivo_dados), nova_linha], ignore_index=True)
-        df.to_csv(arquivo_
+        df_atual = pd.read_csv(arquivo_dados)
+        df_final = pd.concat([df_atual, nova_l], ignore_index=True) # CORREÇÃO DO BUG
+        df_final.to_csv(arquivo_dados, index=False)
+        st.success("Chegada vinculada ao motorista!")
+        st.rerun()
+
+# --- ABA DE HISTÓRICO ---
+with tab3:
+    st.header("Histórico de Auditoria")
+    if os.path.exists(arquivo_dados):
+        st.dataframe(pd.read_csv(arquivo_dados))
