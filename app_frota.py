@@ -7,13 +7,13 @@ import os
 st.set_page_config(page_title="Frota Empresa", page_icon="🚗", layout="wide")
 st.title("🚗 Gestão de Frota - Oficial")
 
-# 1. Lista de Veículos
+# 1. Lista de Veículos (Simplificada para evitar erros de NameError)
 carros = {
     "Prisma": "FNZ6B39", "UP": "GCP3490", "Saveiro": "SUO3J14",
     "Strada": "TEQ3I82", "Onix": "FPQ7B62"
 }
-# CORREÇÃO DA LINHA 13:
-lista_v = [f"{n} ({p})" for n, p in carros.items()]
+# LINHA 13 CORRIGIDA (SEM F-STRING COMPLEXA)
+lista_v = [n + " (" + p + ")" for n, p in carros.items()]
 
 # 2. Mapa de Peças
 pecas = [
@@ -26,6 +26,7 @@ pecas = [
 
 arq = "gestao_frota_oficial.csv"
 
+# Inicializar banco de dados
 if not os.path.exists(arq):
     cols = ["Data", "Ação", "Veículo", "Usuário", "KM", "CNH", "Av_Saida", "Av_Chegada", "Av_Totais", "Obs"]
     pd.DataFrame(columns=cols).to_csv(arq, index=False)
@@ -46,18 +47,18 @@ t1, t2, t3, t4 = st.tabs(["📤 Saída", "📥 Chegada", "🔧 Manutenção", "�
 # --- ABA 1: SAÍDA ---
 with t1:
     st.header("Registar Saída")
-    v_s = st.selectbox("Veículo", lista_v, key="vs")
+    v_s = st.selectbox("Selecione o Veículo", lista_v, key="vs")
     st_s = get_status(v_s)
     
     if st_s["acao"] == "SAÍDA":
-        st.error("🚫 BLOQUEADO: O veículo está com " + st_s["user"])
+        st.error("🚫 BLOQUEADO: Veículo em uso por " + str(st_s["user"]))
     else:
         val_cnh = st.date_input("Validade da CNH", value=date.today(), key="cnh")
         if val_cnh < date.today():
-            st.error("❌ MOTORISTA NÃO AUTORIZADO: CNH Vencida.")
+            st.error("❌ CNH Vencida. Saída bloqueada.")
         else:
             st.success("✅ Último KM: " + str(st_s["km"]))
-            n_s = st.text_input("Motorista", key="ns")
+            n_s = st.text_input("Nome do Motorista", key="ns")
             km_s = st.number_input("KM Inicial", min_value=st_s['km'], value=st_s['km'], step=1, key="ks")
             
             d_av = []
@@ -66,82 +67,4 @@ with t1:
                 d_av = [x for x in brutos if x in pecas]
 
             av_s = st.multiselect("Checklist de Avarias (Estado Atual):", pecas, default=d_av, key="as")
-            ob_s = st.text_area("Obs. Saída:", key="os")
-            
-            if st.button("Confirmar Saída"):
-                if n_s:
-                    txt_av = ", ".join(av_s) if av_s else "Nenhuma"
-                    nova_l = pd.DataFrame([{
-                        "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                        "Ação": "SAÍDA", "Veículo": v_s, "Usuário": n_s, "KM": km_s,
-                        "CNH": val_cnh.strftime("%d/%m/%Y"), "Av_Saida": txt_av,
-                        "Av_Chegada": "Pendente", "Av_Totais": txt_av, "Obs": ob_s
-                    }])
-                    pd.concat([pd.read_csv(arq), nova_l], ignore_index=True).to_csv(arq, index=False)
-                    st.success("Saída registada!")
-                    st.rerun()
-
-# --- ABA 2: CHEGADA ---
-with t2:
-    st.header("Registar Chegada")
-    v_d = st.selectbox("Veículo", lista_v, key="vd")
-    st_d = get_status(v_d)
-    
-    if st_d["acao"] == "CHEGADA":
-        st.info("ℹ️ Veículo no pátio.")
-    else:
-        st.warning("👤 Motorista: " + st_d["user"])
-        km_d = st.number_input("KM Final", min_value=st_d['km'], value=st_d['km'], step=1, key="kd")
-        st.write("**Avarias na saída:** " + st_d["av"])
-        n_av = st.multiselect("Novas avarias detectadas:", pecas, key="ad")
-        ob_d = st.text_area("Obs. Chegada:", key="od")
-        
-        if st.button("Confirmar Chegada"):
-            txt_n = ", ".join(n_av) if n_av else "Nenhuma"
-            l_t = [st_d['av']] if st_d['av'] != "Nenhuma" else []
-            if txt_n != "Nenhuma": l_t.append(txt_n)
-            av_f = " | ".join(l_t) if l_t else "Nenhuma"
-            
-            nova_l = pd.DataFrame([{
-                "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                "Ação": "CHEGADA", "Veículo": v_d, "Usuário": st_d['user'], "KM": km_d,
-                "CNH": "N/A", "Av_Saida": st_d['av'], "Av_Chegada": txt_n, "Av_Totais": av_f, "Obs": ob_d
-            }])
-            pd.concat([pd.read_csv(arq), nova_l], ignore_index=True).to_csv(arq, index=False)
-            st.success("Chegada registada!")
-            st.rerun()
-
-# --- ABA 3: MANUTENÇÃO ---
-with t3:
-    st.header("🔧 Gestão de Reparos")
-    v_m = st.selectbox("Veículo para Manutenção", lista_v, key="vm")
-    st_m = get_status(v_m)
-    
-    if st_m["av"] == "Nenhuma":
-        st.success("✅ Este veículo não possui avarias pendentes.")
-    else:
-        st.warning("⚠️ Itens com avaria: " + st_m["av"])
-        lista_atual = [x.strip() for x in st_m['av'].replace('|', ',').split(',')]
-        reparados = st.multiselect("Marque os itens que foram CONSERTADOS:", lista_atual, key="reparo")
-        mecanico = st.text_input("Responsável/Oficina", key="mec")
-        
-        if st.button("Registar Reparo"):
-            if reparados and mecanico:
-                restantes = [i for i in lista_atual if i not in reparados]
-                novas_av = " | ".join(restantes) if restantes else "Nenhuma"
-                
-                nova_l = pd.DataFrame([{
-                    "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                    "Ação": "REPARO", "Veículo": v_m, "Usuário": mecanico, "KM": st_m["km"],
-                    "CNH": "N/A", "Av_Saida": "Conserto de: " + ", ".join(reparados),
-                    "Av_Chegada": "N/A", "Av_Totais": novas_av, "Obs": "Manutenção realizada"
-                }])
-                pd.concat([pd.read_csv(arq), nova_l], ignore_index=True).to_csv(arq, index=False)
-                st.success("Reparo gravado! O veículo foi atualizado.")
-                st.rerun()
-
-# --- ABA 4: HISTÓRICO ---
-with t4:
-    st.header("📋 Histórico Geral")
-    if os.path.exists(arq):
-        st.dataframe(pd.read_csv(arq), use_container_width=True)
+            ob_s = st.text_area("Observações de Saída:", key="os")
