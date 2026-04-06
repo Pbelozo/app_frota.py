@@ -67,4 +67,46 @@ with t2:
         st.info("ℹ️ Veículo no pátio.")
     else:
         st.warning("👤 Motorista: " + str(st_d["user"]))
-        km_d = st.number_input("KM Final", min_value=st_d['km'], value=st_d
+        # Linha corrigida e encurtada para não quebrar:
+        km_d = st.number_input("KM Final", min_value=st_d['km'], value=st_d['km'], step=1, key="kd")
+        st.write("**Avarias na saída:** " + st_d["av"])
+        n_av = st.multiselect("Novas avarias:", pecas, key="ad")
+        ob_d = st.text_area("Obs. Chegada:", key="od")
+        if st.button("Confirmar Chegada"):
+            txt_n = ", ".join(n_av) if n_av else "Nenhuma"
+            l_t = [st_d['av']] if st_d['av'] != "Nenhuma" else []
+            if txt_n != "Nenhuma": l_t.append(txt_n)
+            av_f = " | ".join(l_t) if l_t else "Nenhuma"
+            nova_l = pd.DataFrame([{"Data": datetime.now().strftime("%d/%m/%Y %H:%M"), "Ação": "CHEGADA", "Veículo": v_d, "Usuário": st_d['user'], "KM": km_d, "CNH": "N/A", "Av_Saida": st_d['av'], "Av_Chegada": txt_n, "Av_Totais": av_f, "Obs": ob_d}])
+            pd.concat([pd.read_csv(arq), nova_l], ignore_index=True).to_csv(arq, index=False)
+            st.success("Chegada registada!")
+            st.rerun()
+
+with t3:
+    st.header("🔧 Reparos")
+    v_m = st.selectbox("Veículo para Manutenção", lista_v, key="vm")
+    st_m = get_status(v_m)
+    if st_m["av"] == "Nenhuma":
+        st.success("✅ Sem avarias.")
+    else:
+        st.warning("⚠️ Itens: " + st_m["av"])
+        lista_at = [x.strip() for x in st_m['av'].replace('|', ',').split(',')]
+        reparados = st.multiselect("Itens consertados:", lista_at, key="reparo")
+        mec = st.text_input("Responsável", key="mec")
+        if st.button("Registar Reparo"):
+            if reparados and mec:
+                rest = [i for i in lista_at if i not in reparados]
+                n_av = " | ".join(rest) if rest else "Nenhuma"
+                nova_l = pd.DataFrame([{"Data": datetime.now().strftime("%d/%m/%Y %H:%M"), "Ação": "REPARO", "Veículo": v_m, "Usuário": mec, "KM": st_m["km"], "CNH": "N/A", "Av_Saida": "Reparo: " + ", ".join(reparados), "Av_Totais": n_av, "Obs": "Manutenção"}])
+                pd.concat([pd.read_csv(arq), nova_l], ignore_index=True).to_csv(arq, index=False)
+                st.success("Atualizado!")
+                st.rerun()
+
+with t4:
+    st.header("📋 Histórico")
+    if os.path.exists(arq):
+        df_hist = pd.read_csv(arq)
+        if not df_hist.empty:
+            st.dataframe(df_hist, use_container_width=True)
+        else:
+            st.write("Aguardando registros...")
