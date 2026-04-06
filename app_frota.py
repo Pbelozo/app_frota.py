@@ -23,8 +23,9 @@ mapa_pecas = [
     "14. Tampa do Porta-malas", "15. Lanterna Traseira"
 ]
 
-arquivo_dados = "historico_frota_v11.csv"
+arquivo_dados = "historico_frota_v12.csv"
 
+# Inicializar arquivo se não existir
 if not os.path.exists(arquivo_dados):
     cols = ["Data", "Ação", "Veículo", "Usuário", "KM", "Avarias_Saida", "Novas_Avarias_Chegada", "Avarias_Totais", "Observações"]
     pd.DataFrame(columns=cols).to_csv(arquivo_dados, index=False)
@@ -61,8 +62,70 @@ with tab1:
         if st.button("Confirmar Saída"):
             if n_s:
                 txt_av_s = ", ".join(av_s) if av_s else "Nenhuma"
-                nova_l = pd.DataFrame([{
+                dados_nova_l = {
                     "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
-                    "Ação": "SAÍDA", "Veículo": v_s, "Usuário": n_s, "KM": km_s,
-                    "Avarias_Saida": txt_av_s, "Novas_Avarias_Chegada": "N/A",
-                    "Avarias_Totais": txt_av_
+                    "Ação": "SAÍDA", 
+                    "Veículo": v_s, 
+                    "Usuário": n_s, 
+                    "KM": km_s,
+                    "Avarias_Saida": txt_av_s, 
+                    "Novas_Avarias_Chegada": "N/A",
+                    "Avarias_Totais": txt_av_s, 
+                    "Observações": obs_s
+                }
+                nova_l = pd.DataFrame([dados_nova_l])
+                df_f = pd.concat([pd.read_csv(arquivo_dados), nova_l], ignore_index=True)
+                df_f.to_csv(arquivo_dados, index=False)
+                st.success("Saída registada!")
+                st.rerun()
+            else:
+                st.error("Insira o nome do motorista.")
+
+with tab2:
+    st.header("Registar Chegada")
+    v_d = st.selectbox("Veículo", lista_exibicao, key="vd")
+    status_d = verificar_status_veiculo(v_d)
+    
+    if status_d["acao"] == "CHEGADA":
+        st.info("ℹ️ Veículo disponível no pátio.")
+    else:
+        st.warning(f"👤 Motorista Responsável: **{status_d['motorista']}**")
+        st.markdown(f"**⚠️ Avarias registadas na saída:** {status_d['avarias_saida']}")
+        
+        km_d = st.number_input("KM Final", min_value=0, step=1, key="kd")
+        novas_av_d = st.multiselect("Registrar APENAS NOVOS danos desta viagem:", mapa_pecas, key="ad")
+        obs_d = st.text_area("Observações de Chegada:", key="od")
+        
+        if st.button("Confirmar Chegada"):
+            txt_novas = ", ".join(novas_av_d) if novas_av_d else "Nenhuma"
+            
+            # Soma inteligente para a coluna Avarias Totais
+            lista_total = []
+            if status_d['avarias_saida'] != "Nenhuma":
+                lista_total.append(status_d['avarias_saida'])
+            if txt_novas != "Nenhuma":
+                lista_total.append(txt_novas)
+            
+            av_totais = " | ".join(lista_total) if lista_total else "Nenhuma"
+
+            dados_chegada = {
+                "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                "Ação": "CHEGADA", 
+                "Veículo": v_d, 
+                "Usuário": status_d["motorista"], 
+                "KM": km_d,
+                "Avarias_Saida": status_d['avarias_saida'],
+                "Novas_Avarias_Chegada": txt_novas,
+                "Avarias_Totais": av_totais,
+                "Observações": obs_d
+            }
+            nova_l = pd.DataFrame([dados_chegada])
+            df_f = pd.concat([pd.read_csv(arquivo_dados), nova_l], ignore_index=True)
+            df_f.to_csv(arquivo_dados, index=False)
+            st.success("Chegada concluída!")
+            st.rerun()
+
+with tab3:
+    st.header("Histórico para Auditoria")
+    if os.path.exists(arquivo_dados):
+        st.dataframe(pd.read_csv(arquivo_dados))
