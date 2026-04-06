@@ -36,7 +36,6 @@ def get_status(v_alvo):
             df_v = df[df['Veículo'] == v_alvo]
             if not df_v.empty:
                 u = df_v.iloc[-1]
-                # Pegamos as 'Avarias Totais' para serem as novas 'Avarias de Saída'
                 return {"acao": u['Ação'], "user": u['Usuário'], "km": int(u['KM']), "av": str(u['Av_Totais'])}
         except: pass
     return {"acao": "CHEGADA", "user": "Ninguém", "km": 0, "av": "Nenhuma"}
@@ -51,24 +50,50 @@ with t1:
     if st_s["acao"] == "SAÍDA":
         st.error(f"🚫 BLOQUEADO: O veículo está com {st_s['user']}.")
     else:
-        val_cnh = st.date_input("Validade da CNH", key="cnh")
+        # CORREÇÃO DA DATA:
+        val_cnh = st.date_input("Validade da CNH", value=date.today(), key="cnh")
+        
         if val_cnh < date.today():
             st.error("❌ MOTORISTA NÃO AUTORIZADO: CNH Vencida.")
         else:
             st.success(f"✅ Último KM: {st_s['km']}")
-            # EXIBIÇÃO DO ESTADO ATUAL HERDADO
             st.info(f"🔍 Estado atual herdado: {st_s['av']}")
             
             n_s = st.text_input("Motorista", key="ns")
             km_s = st.number_input("KM Inicial", min_value=st_s['km'], value=st_s['km'], step=1, key="ks")
             
-            # Converte o texto herdado de volta para uma lista que o multiselect entende
             default_av = []
             if st_s['av'] != "Nenhuma":
-                # Limpa espaços e separa por vírgula ou barra vertical
-                default_av = [x.strip() for x in st_s['av'].replace('|', ',').split(',')]
-                # Filtra para garantir que apenas itens da lista oficial sejam pré-selecionados
-                default_av = [x for x in default_av if x in pecas]
+                itens_brutos = [x.strip() for x in st_s['av'].replace('|', ',').split(',')]
+                default_av = [x for x in itens_brutos if x in pecas]
 
-            av_s = st.multiselect("Confirme as avarias na saída (ou adicione):", pecas, default=default_av, key="as")
+            av_s = st.multiselect("Confirme as avarias na saída:", pecas, default=default_av, key="as")
             ob_s = st.text_area("Observações:", key="os")
+            
+            if st.button("Confirmar Saída"):
+                if n_s:
+                    txt_av = ", ".join(av_s) if av_s else "Nenhuma"
+                    nova_l = pd.DataFrame([{
+                        "Data": datetime.now().strftime("%d/%m/%Y %H:%M"),
+                        "Ação": "SAÍDA", "Veículo": v_s, "Usuário": n_s, "KM": km_s,
+                        "CNH": val_cnh.strftime("%d/%m/%Y"), "Av_Saida": txt_av,
+                        "Av_Chegada": "Pendente", "Av_Totais": txt_av, "Obs": ob_s
+                    }])
+                    df_all = pd.concat([pd.read_csv(arq), nova_l], ignore_index=True)
+                    df_all.to_csv(arq, index=False)
+                    st.success("Saída registada!")
+                    st.rerun()
+                else:
+                    st.error("Insira o nome do motorista.")
+
+with t2:
+    st.header("Registar Chegada")
+    v_d = st.selectbox("Veículo", lista_v, key="vd")
+    st_d = get_status(v_d)
+    
+    if st_d["acao"] == "CHEGADA":
+        st.info("ℹ️ Veículo no pátio.")
+    else:
+        st.warning(f"👤 Motorista: {st_d['user']} | Saída KM: {st_d['km']}")
+        km_d = st.number_input("KM Final", min_value=st_d['km'], value=st_d['km']+1, step=1, key="kd")
+        st.markdown(f"
