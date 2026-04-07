@@ -42,7 +42,11 @@ def get_status_veiculo(v_alvo):
         df_v = df_h[df_h['Veículo'] == v_alvo]
         if not df_v.empty:
             ult = df_v.iloc[-1]
-            return {"acao": ult['Ação'], "user": ult['Usuário'], "km": int(ult['KM']), "av": str(ult['Av_Totais']) if str(ult['Av_Totais']).strip() != "" else "Nenhuma"}
+            try:
+                km_val = int(float(ult['KM']))
+            except:
+                km_val = 0
+            return {"acao": ult['Ação'], "user": ult['Usuário'], "km": km_val, "av": str(ult['Av_Totais']) if str(ult['Av_Totais']).strip() != "" else "Nenhuma"}
     return {"acao": "CHEGADA", "user": "Ninguém", "km": 0, "av": "Nenhuma"}
 
 def converter_multiplas_fotos(uploaded_files):
@@ -54,7 +58,7 @@ def converter_multiplas_fotos(uploaded_files):
             lista_b64.append(base64.b64encode(buf.getvalue()).decode())
     return ";".join(lista_b64)
 
-# --- CONTROLE DE ESTADO PARA EDIÇÃO ---
+# --- CONTROLE DE ESTADO ---
 if 'edit_v_idx' not in st.session_state: st.session_state.edit_v_idx = None
 if 'edit_u_idx' not in st.session_state: st.session_state.edit_u_idx = None
 if 'edit_a_idx' not in st.session_state: st.session_state.edit_a_idx = None
@@ -77,11 +81,11 @@ if not st.session_state.autenticado:
             nome_m = st.selectbox("Usuário", [""] + df_m_log[df_m_log['Status'] == "Ativo"]['Nome'].tolist())
             if nome_m:
                 dados_m = df_m_log[df_m_log['Nome'] == nome_m].iloc[0]
-                if dados_m['Senha'] == "":
+                if str(dados_m['Senha']).strip() == "":
                     nova_s = st.text_input("Cadastre sua Senha", type="password")
                     if st.button("Salvar e Entrar"):
                         idx = df_m_log[df_m_log['Nome'] == nome_m].index[0]
-                        df_m_log.at[idx, 'Senha'] = nova_s; salvar(df_m_log, ARQ_MOT)
+                        df_m_log.at[idx, 'Senha'] = str(nova_s); salvar(df_m_log, ARQ_MOT)
                         st.session_state.autenticado = True; st.session_state.perfil = "admin" if dados_m['Admin'] == "Sim" else "motorista"
                         st.session_state.user_logado = nome_m; st.rerun()
                 else:
@@ -111,24 +115,23 @@ if st.session_state.perfil == "admin":
             st.subheader("🚗 Veículos")
             df_v = carregar(ARQ_VEIC)
             idx_v = st.session_state.edit_v_idx
-            
             with st.form("f_veic"):
-                val_mod = df_v.iloc[idx_v]['Veículo'] if idx_v is not None else ""
-                val_pla = df_v.iloc[idx_v]['Placa'] if idx_v is not None else ""
+                val_mod = str(df_v.iloc[idx_v]['Veículo']) if idx_v is not None else ""
+                val_pla = str(df_v.iloc[idx_v]['Placa']) if idx_v is not None else ""
                 v_mod = st.text_input("Modelo", value=val_mod)
                 v_pla = st.text_input("Placa", value=val_pla).upper().strip()
-                v_rev_km = st.number_input("KM Últ. Revisão", min_value=0, value=int(df_v.iloc[idx_v]['Ult_Revisao_KM']) if idx_v is not None else 0)
-                v_crit = st.selectbox("Próxima Revisão por:", ["Quilometragem", "Data (Prazo)"], index=0 if idx_v is None or df_v.iloc[idx_v]['Criterio_Revisao'] == "Quilometragem" else 1)
-                v_val_crit = st.text_input("Valor do Critério", value=df_v.iloc[idx_v]['Valor_Criterio'] if idx_v is not None else "")
+                v_km_r = st.number_input("KM Últ. Revisão", min_value=0, value=int(df_v.iloc[idx_v]['Ult_Revisao_KM']) if idx_v is not None else 0)
+                v_crit = st.selectbox("Próxima Revisão por:", ["Quilometragem", "Data (Prazo)"], index=0 if idx_v is None or str(df_v.iloc[idx_v]['Criterio_Revisao']) == "Quilometragem" else 1)
+                v_val_crit = st.text_input("Valor do Critério", value=str(df_v.iloc[idx_v]['Valor_Criterio']) if idx_v is not None else "")
                 
-                txt_btn_v = "Atualizar Veículo" if idx_v is not None else "Cadastrar Veículo"
-                if st.form_submit_button(txt_btn_v):
-                    if idx_v is None and v_pla in df_v['Placa'].values: st.error("Placa duplicada!")
+                if st.form_submit_button("Salvar Veículo"):
+                    nova_v = {"Veículo": v_mod, "Placa": v_pla, "Ult_Revisao_KM": v_km_r, "Criterio_Revisao": v_crit, "Valor_Criterio": v_val_crit, "Status": "Ativo"}
+                    if idx_v is not None:
+                        for k, v in nova_v.items(): df_v.at[idx_v, k] = v
                     else:
-                        nova_v = {"Veículo": v_mod, "Placa": v_pla, "Ult_Revisao_KM": v_rev_km, "Criterio_Revisao": v_crit, "Valor_Criterio": v_val_crit, "Status": "Ativo"}
-                        if idx_v is not None: df_v.iloc[idx_v] = nova_v
+                        if v_pla in df_v['Placa'].values: st.error("Placa duplicada!")
                         else: df_v = pd.concat([df_v, pd.DataFrame([nova_v])], ignore_index=True)
-                        salvar(df_v, ARQ_VEIC); st.session_state.edit_v_idx = None; st.rerun()
+                    salvar(df_v, ARQ_VEIC); st.session_state.edit_v_idx = None; st.rerun()
             
             for i, r in df_v.iterrows():
                 with st.container(border=True):
@@ -144,30 +147,30 @@ if st.session_state.perfil == "admin":
             st.subheader("👤 Usuários")
             df_u = carregar(ARQ_MOT)
             idx_u = st.session_state.edit_u_idx
-            
             with st.form("f_user"):
-                val_unome = df_u.iloc[idx_u]['Nome'] if idx_u is not None else ""
+                val_unome = str(df_u.iloc[idx_u]['Nome']) if idx_u is not None else ""
                 u_nome = st.text_input("Nome Completo", value=val_unome)
-                val_cnh = datetime.strptime(df_u.iloc[idx_u]['Validade_CNH'], '%Y-%m-%d').date() if idx_u is not None else date.today()
+                try:
+                    val_cnh = datetime.strptime(str(df_u.iloc[idx_u]['Validade_CNH']), '%Y-%m-%d').date() if idx_u is not None else date.today()
+                except:
+                    val_cnh = date.today()
                 u_cnh = st.date_input("Validade CNH", value=val_cnh)
-                u_adm = st.selectbox("Admin?", ["Não", "Sim"], index=0 if idx_u is None or df_u.iloc[idx_u]['Admin'] == "Não" else 1)
+                u_adm = st.selectbox("Admin?", ["Não", "Sim"], index=0 if idx_u is None or str(df_u.iloc[idx_u]['Admin']) == "Não" else 1)
                 
-                txt_btn_u = "Atualizar Usuário" if idx_u is not None else "Cadastrar Usuário"
-                if st.form_submit_button(txt_btn_u):
-                    if idx_u is None and u_nome in df_u['Nome'].values: st.error("Nome duplicado!")
+                if st.form_submit_button("Salvar Usuário"):
+                    if idx_u is not None:
+                        df_u.at[idx_u, 'Nome'] = str(u_nome)
+                        df_u.at[idx_u, 'Validade_CNH'] = str(u_cnh) # Força string para evitar TypeError
+                        df_u.at[idx_u, 'Admin'] = str(u_adm)
                     else:
-                        if idx_u is not None:
-                            df_u.at[idx_u, 'Nome'] = u_nome
-                            df_u.at[idx_u, 'Validade_CNH'] = u_cnh
-                            df_u.at[idx_u, 'Admin'] = u_adm
+                        if u_nome in df_u['Nome'].values: st.error("Nome duplicado!")
                         else:
-                            nova_u = {"Nome": u_nome, "Validade_CNH": u_cnh, "Status": "Ativo", "Senha": "", "Admin": u_adm}
-                            df_u = pd.concat([df_u, pd.DataFrame([nova_u])], ignore_index=True)
-                        salvar(df_u, ARQ_MOT); st.session_state.edit_u_idx = None; st.rerun()
+                            df_u = pd.concat([df_u, pd.DataFrame([{"Nome": u_nome, "Validade_CNH": str(u_cnh), "Status": "Ativo", "Senha": "", "Admin": u_adm}])], ignore_index=True)
+                    salvar(df_u, ARQ_MOT); st.session_state.edit_u_idx = None; st.rerun()
             
             for i, r in df_u.iterrows():
                 with st.container(border=True):
-                    st.write(f"**{r['Nome']}** ({r['Status']})")
+                    st.write(f"**{r['Nome']}** (CNH: {r['Validade_CNH']})")
                     b1, b2, b3, b4 = st.columns(4)
                     if b1.button("📝", key=f"eu{i}"): st.session_state.edit_u_idx = i; st.rerun()
                     if b2.button("🔑", key=f"ru{i}"): df_u.at[i, 'Senha'] = ""; salvar(df_u, ARQ_MOT); st.rerun()
@@ -181,7 +184,7 @@ if st.session_state.perfil == "admin":
             df_a = carregar(ARQ_PECAS)
             idx_a = st.session_state.edit_a_idx
             with st.form("f_av"):
-                val_av = df_a.iloc[idx_a]['Item'] if idx_a is not None else ""
+                val_av = str(df_a.iloc[idx_a]['Item']) if idx_a is not None else ""
                 n_av = st.text_input("Avaria", value=val_av)
                 if st.form_submit_button("Salvar"):
                     if idx_a is not None: df_a.at[idx_a, 'Item'] = n_av
@@ -207,7 +210,10 @@ with tabs[1 + idx_tab]:
         if v_s and m_s:
             st_v = get_status_veiculo(v_s)
             u_info = df_m_ativos[df_m_ativos['Nome'] == m_s].iloc[0]
-            dt_cnh = datetime.strptime(str(u_info['Validade_CNH']), '%Y-%m-%d').date()
+            try:
+                dt_cnh = datetime.strptime(str(u_info['Validade_CNH']), '%Y-%m-%d').date()
+            except:
+                dt_cnh = date.today() - timedelta(days=1)
             
             if dt_cnh < date.today():
                 st.error(f"🚫 CNH VENCIDA ({dt_cnh.strftime('%d/%m/%Y')})")
@@ -220,7 +226,7 @@ with tabs[1 + idx_tab]:
                 p_lista = carregar(ARQ_PECAS)[carregar(ARQ_PECAS)['Status'] == "Ativo"]['Item'].tolist()
                 checklist = st.multiselect("Avarias", list(set(p_lista + av_atuais)), default=av_atuais)
                 if st.button("Confirmar Saída"):
-                    nova = pd.DataFrame([{"Data": get_data_hora_br(), "Ação": "SAÍDA", "Veículo": v_s, "Usuário": m_s, "KM": km_sai, "CNH": dt_cnh, "Av_Saida": ", ".join(checklist), "Av_Totais": ", ".join(checklist), "Foto_Base64": converter_multiplas_fotos(fotos_s)}])
+                    nova = pd.DataFrame([{"Data": get_data_hora_br(), "Ação": "SAÍDA", "Veículo": v_s, "Usuário": m_s, "KM": km_sai, "CNH": str(dt_cnh), "Av_Saida": ", ".join(checklist), "Av_Totais": ", ".join(checklist), "Foto_Base64": converter_multiplas_fotos(fotos_s)}])
                     salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.rerun()
 
 # --- ABA CHEGADA ---
