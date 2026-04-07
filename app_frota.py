@@ -1,18 +1,20 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 import os
 import base64
 from io import BytesIO
 from PIL import Image
 
 st.set_page_config(page_title="Frota Empresa", page_icon="🚗", layout="wide")
-st.title("🚗 Gestão de Frota - Oficial V43")
+st.title("🚗 Gestão de Frota - Oficial V44")
 
-# --- AJUSTE DE HORÁRIO SEM PYTZ (UTC-3) ---
+# --- AJUSTE DEFINITIVO DE HORÁRIO BRASÍLIA (UTC-3) ---
 def get_data_hora_br():
-    # O servidor usa UTC. Subtraímos 3 horas para Brasília.
-    agora_br = datetime.now() - timedelta(hours=3)
+    # Cria o fuso horário UTC-3 (Brasília)
+    fuso_br = timezone(timedelta(hours=-3))
+    # Captura a hora atual do sistema já convertida para o fuso correto
+    agora_br = datetime.now(fuso_br)
     return agora_br.strftime("%d/%m/%Y %H:%M")
 
 # --- CONFIGURAÇÃO DE ARQUIVOS ---
@@ -34,7 +36,7 @@ def inicializar():
 
 inicializar()
 
-# --- FUNÇÕES CORE ---
+# --- FUNÇÕES CORE (MANTIDAS) ---
 def carregar(arq): return pd.read_csv(arq).fillna("")
 def salvar(df, arq): df.to_csv(arq, index=False)
 
@@ -161,7 +163,7 @@ with tabs[1]:
             checklist = st.multiselect("Checklist de Avarias:", p_lista, default=[x.strip() for x in st_v['av'].split(',') if x.strip() in p_lista])
             if st.button("🚀 Confirmar Saída"):
                 nova = pd.DataFrame([{
-                    "Data": get_data_hora_br(),
+                    "Data": get_data_hora_br(), # CHAMADA DA FUNÇÃO CORRIGIDA
                     "Ação": "SAÍDA", "Veículo": v_s, "Usuário": m_s, "KM": km_sai, "CNH": dt_cnh,
                     "Av_Saida": ", ".join(checklist), "Av_Chegada": "Pendente", "Av_Totais": ", ".join(checklist), "Obs": "", "Foto_Base64": converter_foto(foto_s)
                 }])
@@ -182,27 +184,23 @@ with tabs[2]:
                 l_b = [st_ret['av']] if st_ret['av'] != "Nenhuma" else []
                 if txt_n != "Nenhuma": l_b.append(txt_n)
                 nova = pd.DataFrame([{
-                    "Data": get_data_hora_br(),
+                    "Data": get_data_hora_br(), # CHAMADA DA FUNÇÃO CORRIGIDA
                     "Ação": "CHEGADA", "Veículo": v_ret, "Usuário": st_ret['user'], "KM": km_f, "CNH": "",
                     "Av_Saida": st_ret['av'], "Av_Chegada": txt_n, "Av_Totais": " | ".join(l_b) if l_b else "Nenhuma", "Obs": "Retorno", "Foto_Base64": converter_foto(foto_c)
                 }])
                 salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.success("Registrado!"); st.rerun()
     else: st.info("Veículo no pátio.")
 
-# --- ABA 4: MANUTENÇÃO ---
+# --- DEMAIS ABAS (MANTIDAS) ---
 with tabs[3]:
     st.header("🔧 Reparos")
-    v_m = st.selectbox("Veículo oficina", ["Selecione..."] + [f"{r['Veículo']} ({r['Placa']})" for _, r in carregar(ARQ_VEIC).iterrows()])
+    v_m = st.selectbox("Veículo oficina", ["Selecione..."] + [f"{r['Veículo']} ({r['Placa']})" for _, r in carregar(ARQ_VEIC).iterrows()], key="m_of")
     if v_m != "Selecione...":
-        st_manut = get_status_veiculo(v_m)
-        if st_manut["av"] != "Nenhuma" and st.button("🛠️ Limpar Avarias"):
-            nova = pd.DataFrame([{
-                "Data": get_data_hora_br(),
-                "Ação": "REPARO", "Veículo": v_m, "Usuário": "Oficina", "KM": st_manut['km'], "CNH": "", "Av_Saida": "Conserto", "Av_Chegada": "", "Av_Totais": "Nenhuma", "Obs": "Reparo", "Foto_Base64": ""
-            }])
+        st_m = get_status_veiculo(v_m)
+        if st_m["av"] != "Nenhuma" and st.button("🛠️ Limpar Avarias"):
+            nova = pd.DataFrame([{"Data": get_data_hora_br(), "Ação": "REPARO", "Veículo": v_m, "Usuário": "Oficina", "KM": st_m['km'], "CNH": "", "Av_Saida": "Reparo", "Av_Chegada": "", "Av_Totais": "Nenhuma", "Obs": "Manutenção", "Foto_Base64": ""}])
             salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.success("Reparado!"); st.rerun()
 
-# --- ABA 5: HISTÓRICO ---
 with tabs[4]:
     st.header("📋 Histórico")
     df_h = carregar(ARQ_HIST)
@@ -218,3 +216,4 @@ with tabs[4]:
                 if st.button("🗑️ Excluir Foto"):
                     df_h.at[idx_foto, "Foto_Base64"] = ""
                     salvar(df_h, ARQ_HIST); st.rerun()
+            else: st.info("Sem foto.")
