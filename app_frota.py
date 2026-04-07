@@ -15,7 +15,7 @@ ARQ_VEIC = "cadastro_veiculos.csv"
 ARQ_MOT  = "cadastro_motoristas.csv"
 ARQ_PECAS = "cadastro_pecas.csv"
 
-# 3. Inicialização e Integridade
+# 3. Inicialização e Migração de Dados
 def inicializar():
     col_h = ["Data", "Ação", "Veículo", "Usuário", "KM", "CNH", "Av_Saida", "Av_Chegada", "Av_Totais", "Obs", "Valor_Reparo", "Local_Reparo", "Foto_Base64"]
     if not os.path.exists(ARQ_HIST):
@@ -24,12 +24,12 @@ def inicializar():
     if not os.path.exists(ARQ_MOT):
         pd.DataFrame(columns=["Nome", "Validade_CNH", "Status", "Senha", "Admin"]).to_csv(ARQ_MOT, index=False)
     
-    # Estrutura de Veículos com campos para regra de revisão
     col_v = ["Veículo", "Placa", "Ult_Revisao_KM", "Ult_Revisao_Data", "Int_KM", "Int_Meses", "Alert_KM", "Alert_Dias", "Status"]
     if not os.path.exists(ARQ_VEIC):
         pd.DataFrame(columns=col_v).to_csv(ARQ_VEIC, index=False)
     else:
         dfv = pd.read_csv(ARQ_VEIC)
+        # Garante que colunas novas existam e tenham valores numéricos válidos
         for c in ["Int_KM", "Int_Meses", "Alert_KM", "Alert_Dias"]:
             if c not in dfv.columns: dfv[c] = 0
         dfv.to_csv(ARQ_VEIC, index=False)
@@ -59,30 +59,33 @@ def get_status_veiculo(v_alvo):
             return {"acao": ult['Ação'], "user": ult['Usuário'], "km": km_val, "av": str(ult['Av_Totais']) if str(ult['Av_Totais']).strip() != "" else "Nenhuma"}
     return {"acao": "CHEGADA", "user": "Ninguém", "km": 0, "av": "Nenhuma"}
 
-# --- LÓGICA CRÍTICA DE REVISÃO ---
 def calcular_revisao(v_info, km_atual):
     try:
-        # Prazos e Limites
-        km_limite = int(v_info['Ult_Revisao_KM']) + int(v_info['Int_KM'])
-        km_alerta = km_limite - int(v_info['Alert_KM'])
+        # Prazos e Limites (Segurança contra valores nulos/vazios)
+        i_km = int(v_info['Int_KM']) if str(v_info['Int_KM']).isdigit() else 0
+        i_mes = int(v_info['Int_Meses']) if str(v_info['Int_Meses']).isdigit() else 0
+        a_km = int(v_info['Alert_KM']) if str(v_info['Alert_KM']).isdigit() else 0
+        a_dia = int(v_info['Alert_Dias']) if str(v_info['Alert_Dias']).isdigit() else 0
+
+        km_limite = int(v_info['Ult_Revisao_KM']) + i_km
+        km_alerta = km_limite - a_km
         
         dt_ult = datetime.strptime(str(v_info['Ult_Revisao_Data']), '%Y-%m-%d').date()
-        dt_limite = dt_ult + timedelta(days=int(v_info['Int_Meses']) * 30)
-        dt_alerta = dt_limite - timedelta(days=int(v_info['Alert_Dias']))
+        dt_limite = dt_ult + timedelta(days=i_mes * 30)
+        dt_alerta = dt_limite - timedelta(days=a_dia)
         hoje = date.today()
 
         # 1. VERMELHO (Vencido)
-        if km_atual >= km_limite: return "🔴 VENCIDA (KM)", f"Limite {km_limite} KM atingido."
-        if hoje >= dt_limite: return "🔴 VENCIDA (Prazo)", f"Venceu em {dt_limite.strftime('%d/%m/%Y')}."
+        if i_km > 0 and km_atual >= km_limite: return "🔴 VENCIDA (KM)", f"Limite {km_limite} KM atingido."
+        if i_mes > 0 and hoje >= dt_limite: return "🔴 VENCIDA (Prazo)", f"Venceu em {dt_limite.strftime('%d/%m/%Y')}."
         
         # 2. AMARELO (A vencer)
-        if km_atual >= km_alerta: return "🟡 A VENCER (KM)", f"Faltam {km_limite - km_atual} KM."
-        if hoje >= dt_alerta: return "🟡 A VENCER (Prazo)", f"Vence em {(dt_limite - hoje).days} dias."
+        if i_km > 0 and km_atual >= km_alerta: return "🟡 A VENCER (KM)", f"Faltam {km_limite - km_atual} KM."
+        if i_mes > 0 and hoje >= dt_alerta: return "🟡 A VENCER (Prazo)", f"Vence em {(dt_limite - hoje).days} dias."
         
-        # 3. VERDE (Em dia)
-        return "🟢 EM DIA", "Manutenção conforme cronograma."
+        return "🟢 EM DIA", "Manutenção regular."
     except:
-        return "⚪ AGUARDANDO DADOS", "Preencha os critérios de revisão."
+        return "⚪ AGUARDANDO CONFIGURAÇÃO", "Acesse Gestão e preencha os dados do veículo."
 
 def converter_multiplas_fotos(uploaded_files):
     lista_b64 = []
@@ -93,7 +96,7 @@ def converter_multiplas_fotos(uploaded_files):
             lista_b64.append(base64.b64encode(buf.getvalue()).decode())
     return ";".join(lista_b64)
 
-# --- LOGIN ---
+# --- LOGIN E ESTADOS ---
 if 'autenticado' not in st.session_state: st.session_state.autenticado = False
 if 'perfil' not in st.session_state: st.session_state.perfil = "motorista"
 if 'user_logado' not in st.session_state: st.session_state.user_logado = None
@@ -153,16 +156,17 @@ if st.session_state.perfil == "admin":
                 except: dt_ini = date.today()
                 v_dt_r = st.date_input("Data Últ. Revisão*", value=dt_ini)
                 
-                st.write("**Definição de Intervalos:**")
-                v_i_km = st.number_input("Intervalo KM*", min_value=100, value=int(df_v.iloc[v_idx]['Int_KM']) if v_idx is not None else 10000)
-                v_i_mes = st.number_input("Intervalo Meses*", min_value=1, value=int(df_v.iloc[v_idx]['Int_Meses']) if v_idx is not None else 12)
+                st.write("**Parâmetros de Próxima Revisão:**")
+                # Corrigido: min_value=0 para evitar StreamlitValueBelowMinError
+                v_i_km = st.number_input("Intervalo KM (ex: 10000)*", min_value=0, value=int(df_v.iloc[v_idx]['Int_KM']) if v_idx is not None else 10000)
+                v_i_mes = st.number_input("Intervalo Meses (ex: 12)*", min_value=0, value=int(df_v.iloc[v_idx]['Int_Meses']) if v_idx is not None else 12)
                 
-                st.write("**Antecedência de Alerta:**")
-                v_a_km = st.number_input("Avisar KM antes*", value=int(df_v.iloc[v_idx]['Alert_KM']) if v_idx is not None else 500)
-                v_a_dia = st.number_input("Avisar DIAS antes*", value=int(df_v.iloc[v_idx]['Alert_Dias']) if v_idx is not None else 30)
+                st.write("**Configuração de Alerta:**")
+                v_a_km = st.number_input("Avisar quantos KM antes?*", min_value=0, value=int(df_v.iloc[v_idx]['Alert_KM']) if v_idx is not None else 500)
+                v_a_dia = st.number_input("Avisar quantos DIAS antes?*", min_value=0, value=int(df_v.iloc[v_idx]['Alert_Dias']) if v_idx is not None else 30)
 
                 if st.form_submit_button("Salvar Veículo"):
-                    if not v_mod or not v_pla: st.error("Preencha os campos obrigatórios!")
+                    if not v_mod or not v_pla: st.error("Modelo e Placa são obrigatórios.")
                     else:
                         nova_v = {"Veículo": v_mod, "Placa": v_pla, "Ult_Revisao_KM": v_km_r, "Ult_Revisao_Data": str(v_dt_r), "Int_KM": v_i_km, "Int_Meses": v_i_mes, "Alert_KM": v_a_km, "Alert_Dias": v_a_dia, "Status": "Ativo"}
                         if v_idx is not None: df_v.iloc[v_idx] = nova_v
@@ -187,7 +191,7 @@ if st.session_state.perfil == "admin":
                 u_cnh = st.date_input("Validade CNH*", value=cnh_ini)
                 u_adm = st.selectbox("Admin?", ["Não", "Sim"], index=0 if u_idx is None or str(df_u.iloc[u_idx]['Admin']) == "Não" else 1)
                 if st.form_submit_button("Salvar Usuário"):
-                    if not u_nome: st.error("Informe o nome.")
+                    if not u_nome: st.error("Nome é obrigatório.")
                     else:
                         if u_idx is not None:
                             df_u.at[u_idx, 'Nome'] = u_nome
@@ -198,7 +202,7 @@ if st.session_state.perfil == "admin":
                         salvar(df_u, ARQ_MOT); st.session_state.edit_u_idx = None; st.rerun()
             for i, r in df_u.iterrows():
                 with st.container(border=True):
-                    st.write(f"**{r['Nome']}** (CNH: {r['Validade_CNH']})")
+                    st.write(f"**{r['Nome']}** ({r['Validade_CNH']})")
                     b1, b2, b3 = st.columns(3)
                     if b1.button("📝", key=f"eu{i}"): st.session_state.edit_u_idx = i; st.rerun()
                     if b2.button("🚫", key=f"bu{i}"): df_u.at[i, 'Status'] = "Inativo" if r['Status'] == "Ativo" else "Ativo"; salvar(df_u, ARQ_MOT); st.rerun()
@@ -229,14 +233,14 @@ with tabs[1 + idx_tab]:
         dt_cnh = datetime.strptime(str(u_info['Validade_CNH']), '%Y-%m-%d').date()
         v_info = df_v_at[df_v_at['Placa'] == v_s.split('(')[1].replace(')','')].iloc[0]
         
-        # STATUS DA REVISÃO
+        # STATUS DA REVISÃO (MANTENDO REGRA CRÍTICA)
         s_rev, m_rev = calcular_revisao(v_info, st_v['km'])
-        st.info(f"STATUS DE MANUTENÇÃO: {s_rev} | {m_rev}")
+        st.info(f"STATUS DE REVISÃO: {s_rev} | {m_rev}")
 
         if dt_cnh < date.today():
-            st.error(f"🚫 OPERAÇÃO BLOQUEADA: CNH de {m_s} venceu em {dt_cnh.strftime('%d/%m/%Y')}.")
+            st.error(f"🚫 BLOQUEADO: CNH de {m_s} vencida em {dt_cnh.strftime('%d/%m/%Y')}.")
         elif st_v["acao"] == "SAÍDA":
-            st.error("Veículo já está em uso.")
+            st.error("Veículo já em uso.")
         else:
             km_sai = st.number_input("KM Inicial*", min_value=st_v['km'], value=st_v['km'])
             fotos_s = st.file_uploader("Fotos Saída", accept_multiple_files=True)
@@ -255,7 +259,7 @@ with tabs[2 + idx_tab]:
     if v_ret:
         st_ret = get_status_veiculo(v_ret)
         km_f = st.number_input("KM Final*", min_value=st_ret['km'], value=st_ret['km'])
-        fotos_c = st.file_uploader("Fotos", accept_multiple_files=True)
+        fotos_c = st.file_uploader("Fotos Chegada", accept_multiple_files=True)
         if st.button("Confirmar Chegada"):
             nova = pd.DataFrame([{"Data": get_data_hora_br(), "Ação": "CHEGADA", "Veículo": v_ret, "Usuário": st_ret['user'], "KM": km_f, "Av_Saida": st_ret['av'], "Av_Totais": st_ret['av'], "Foto_Base64": converter_multiplas_fotos(fotos_c)}])
             salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.rerun()
@@ -264,28 +268,30 @@ with tabs[2 + idx_tab]:
 with tabs[3 + idx_tab]:
     st.header("🔧 Oficina")
     veic_man = [v for v in [f"{r['Veículo']} ({r['Placa']})" for _, r in carregar(ARQ_VEIC).iterrows()] if get_status_veiculo(v)["av"] != "Nenhuma"]
-    v_m = st.selectbox("Veículo para reparo", [""] + veic_man)
+    v_m = st.selectbox("Veículo para manutenção", [""] + veic_man)
     if v_m:
         st_m = get_status_veiculo(v_m)
         atuais = [x.strip() for x in st_m['av'].replace('|',',').split(',')]
         reps = st.multiselect("Itens consertados:", atuais)
         loc = st.text_input("Local")
         val = st.number_input("Valor", min_value=0.0)
-        if st.button("Salvar"):
-            rest = [i for i in atuais if i not in reps]
-            nova = pd.DataFrame([{"Data": get_data_hora_br(), "Ação": "REPARO", "Veículo": v_m, "Usuário": loc, "KM": st_m['km'], "Av_Totais": " | ".join(rest) if rest else "Nenhuma", "Valor_Reparo": val, "Local_Reparo": loc}])
-            salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.rerun()
+        if st.button("Salvar Manutenção"):
+            if not loc: st.error("Informe o local do reparo.")
+            else:
+                rest = [i for i in atuais if i not in reps]
+                nova = pd.DataFrame([{"Data": get_data_hora_br(), "Ação": "REPARO", "Veículo": v_m, "Usuário": loc, "KM": st_m['km'], "Av_Totais": " | ".join(rest) if rest else "Nenhuma", "Valor_Reparo": val, "Local_Reparo": loc}])
+                salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.rerun()
 
 # --- ABA 4: HISTÓRICO ---
 with tabs[4 + idx_tab]:
     st.header("📋 Histórico")
     df_h = carregar(ARQ_HIST)
     if not df_h.empty:
-        idx = st.selectbox("Ver fotos ID:", df_h.index)
+        idx = st.selectbox("Linha Detalhes:", df_h.index)
         if st.session_state.perfil == "admin" and st.button("🗑️ EXCLUIR REGISTRO"):
             salvar(df_h.drop(idx), ARQ_HIST); st.rerun()
         st.dataframe(df_h.drop(columns=["Foto_Base64"]), use_container_width=True)
         fb64 = df_h.iloc[idx]["Foto_Base64"]
         if fb64:
             for f in str(fb64).split(";"):
-                if f: st.image(base64.b64decode(f), width=400)
+                if f: st.image(base64.b64decode(f), width=450)
