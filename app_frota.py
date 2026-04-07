@@ -78,22 +78,17 @@ if not st.session_state.autenticado:
             dados = df_m[df_m['Nome'] == n_sel].iloc[0]
             s_i = st.text_input("Senha", type="password")
             if st.button("Entrar"):
-                # LÓGICA DE RESET PARA O PAULO
                 if n_sel == "Paulo" and s_i == "RESET99":
-                    st.session_state.autenticado = True
-                    st.session_state.perfil = "admin"
-                    st.session_state.user_logado = "Paulo"
-                    st.rerun()
+                    st.session_state.autenticado = True; st.session_state.perfil = "admin"; st.session_state.user_logado = "Paulo"; st.rerun()
                 elif str(s_i) == str(dados['Senha']):
                     st.session_state.autenticado = True
                     st.session_state.perfil = "admin" if str(dados['Admin']) == "Sim" else "motorista"
-                    st.session_state.user_logado = n_sel
-                    st.rerun()
+                    st.session_state.user_logado = n_sel; st.rerun()
                 else: st.error("Senha Incorreta")
     st.stop()
 
 # --- INTERFACE PRINCIPAL ---
-st.title(f"Gestão de Frota - Olá {st.session_state.user_logado}")
+st.title(f"Gestão de Frota - {st.session_state.user_logado}")
 if st.sidebar.button("Sair"): st.session_state.autenticado = False; st.rerun()
 
 abas = ["📤 Saída", "📥 Chegada", "🔧 Manutenção", "📋 Histórico"]
@@ -108,8 +103,8 @@ if st.session_state.perfil == "admin":
         with c1:
             st.subheader("🚗 Veículos")
             df_v = carregar(ARQ_VEIC)
+            v_idx = st.session_state.edit_v_idx
             with st.form("f_v"):
-                v_idx = st.session_state.edit_v_idx
                 v_mod = st.text_input("Modelo*", value=str(df_v.iloc[v_idx]['Veículo']) if v_idx is not None else "")
                 v_pla = st.text_input("Placa*", value=str(df_v.iloc[v_idx]['Placa']) if v_idx is not None else "").upper().strip()
                 v_km_r = st.number_input("KM Últ. Revisão*", value=int(df_v.iloc[v_idx]['Ult_Revisao_KM']) if v_idx is not None else 0)
@@ -117,9 +112,13 @@ if st.session_state.perfil == "admin":
                 v_i_km = st.number_input("Intervalo KM*", value=int(df_v.iloc[v_idx]['Int_KM']) if v_idx is not None else 10000)
                 v_i_m = st.number_input("Intervalo Meses*", value=int(df_v.iloc[v_idx]['Int_Meses']) if v_idx is not None else 12)
                 if st.form_submit_button("Salvar Veículo"):
-                    nova = {"Veículo": v_mod, "Placa": v_pla, "Ult_Revisao_KM": v_km_r, "Ult_Revisao_Data": str(v_dt_r), "Int_KM": v_i_km, "Int_Meses": v_i_m, "Alert_KM": 500, "Alert_Dias": 30, "Status": "Ativo"}
-                    if v_idx is not None: df_v.iloc[v_idx] = nova
-                    else: df_v = pd.concat([df_v, pd.DataFrame([nova])], ignore_index=True)
+                    if v_idx is not None:
+                        df_v.at[v_idx, 'Veículo'] = v_mod; df_v.at[v_idx, 'Placa'] = v_pla
+                        df_v.at[v_idx, 'Ult_Revisao_KM'] = v_km_r; df_v.at[v_idx, 'Ult_Revisao_Data'] = str(v_dt_r)
+                        df_v.at[v_idx, 'Int_KM'] = v_i_km; df_v.at[v_idx, 'Int_Meses'] = v_i_m
+                    else:
+                        nova = {"Veículo": v_mod, "Placa": v_pla, "Ult_Revisao_KM": v_km_r, "Ult_Revisao_Data": str(v_dt_r), "Int_KM": v_i_km, "Int_Meses": v_i_m, "Alert_KM": 500, "Alert_Dias": 30, "Status": "Ativo"}
+                        df_v = pd.concat([df_v, pd.DataFrame([nova])], ignore_index=True)
                     salvar(df_v, ARQ_VEIC); st.session_state.edit_v_idx = None; st.rerun()
             for i, r in df_v.iterrows():
                 with st.container(border=True):
@@ -130,15 +129,21 @@ if st.session_state.perfil == "admin":
         with c2:
             st.subheader("👤 Usuários")
             df_u = carregar(ARQ_MOT)
+            u_idx = st.session_state.edit_u_idx
             with st.form("f_u"):
-                u_idx = st.session_state.edit_u_idx
                 u_n = st.text_input("Nome*", value=str(df_u.iloc[u_idx]['Nome']) if u_idx is not None else "")
-                u_c = st.date_input("CNH*", value=datetime.strptime(str(df_u.iloc[u_idx]['Validade_CNH']), '%Y-%m-%d').date() if u_idx is not None else date.today())
+                try: cnh_dt = datetime.strptime(str(df_u.iloc[u_idx]['Validade_CNH']), '%Y-%m-%d').date() if u_idx is not None else date.today()
+                except: cnh_dt = date.today()
+                u_c = st.date_input("CNH*", value=cnh_dt)
                 u_s = st.text_input("Senha*", value=str(df_u.iloc[u_idx]['Senha']) if u_idx is not None else "")
                 u_a = st.selectbox("Admin?", ["Não", "Sim"], index=0 if u_idx is None or str(df_u.iloc[u_idx]['Admin'])=="Não" else 1)
                 if st.form_submit_button("Salvar Usuário"):
-                    if u_idx is not None: df_u.iloc[u_idx] = {"Nome": u_n, "Validade_CNH": str(u_c), "Status": "Ativo", "Senha": u_s, "Admin": u_a}
-                    else: df_u = pd.concat([df_u, pd.DataFrame([{"Nome": u_n, "Validade_CNH": str(u_c), "Status": "Ativo", "Senha": u_s, "Admin": u_a}])], ignore_index=True)
+                    if u_idx is not None:
+                        df_u.at[u_idx, 'Nome'] = u_n; df_u.at[u_idx, 'Validade_CNH'] = str(u_c)
+                        df_u.at[u_idx, 'Senha'] = u_s; df_u.at[u_idx, 'Admin'] = u_a
+                    else:
+                        nova_u = {"Nome": u_n, "Validade_CNH": str(u_c), "Status": "Ativo", "Senha": u_s, "Admin": u_a}
+                        df_u = pd.concat([df_u, pd.DataFrame([nova_u])], ignore_index=True)
                     salvar(df_u, ARQ_MOT); st.session_state.edit_u_idx = None; st.rerun()
             for i, r in df_u.iterrows():
                 with st.container(border=True):
