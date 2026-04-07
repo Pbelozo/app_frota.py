@@ -1,19 +1,18 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import os
 import base64
 from io import BytesIO
 from PIL import Image
-import pytz 
 
 st.set_page_config(page_title="Frota Empresa", page_icon="🚗", layout="wide")
-st.title("🚗 Gestão de Frota - Oficial V42")
+st.title("🚗 Gestão de Frota - Oficial V43")
 
-# --- AJUSTE DE FUSO HORÁRIO (AMERICA/SAO_PAULO) ---
+# --- AJUSTE DE HORÁRIO SEM PYTZ (UTC-3) ---
 def get_data_hora_br():
-    fuso_br = pytz.timezone('America/Sao_Paulo')
-    agora_br = datetime.now(fuso_br)
+    # O servidor usa UTC. Subtraímos 3 horas para Brasília.
+    agora_br = datetime.now() - timedelta(hours=3)
     return agora_br.strftime("%d/%m/%Y %H:%M")
 
 # --- CONFIGURAÇÃO DE ARQUIVOS ---
@@ -65,7 +64,7 @@ if 'edit_m_idx' not in st.session_state: st.session_state.edit_m_idx = -1
 
 tabs = st.tabs(["⚙️ Gestão & Cadastro", "📤 Saída", "📥 Chegada", "🔧 Manutenção", "📋 Histórico"])
 
-# --- ABA 1: GESTÃO & CADASTRO ---
+# --- ABA 1: GESTÃO ---
 with tabs[0]:
     c1, c2, c3 = st.columns(3)
     df_h = carregar(ARQ_HIST)
@@ -87,7 +86,7 @@ with tabs[0]:
                     if v_mod and v_pla and v_dt_r:
                         nova = {"Veículo": v_mod, "Placa": v_pla, "Ult_Revisao_KM": v_km_r, "Ult_Revisao_Data": v_dt_r, "Intervalo_KM": 10000, "Status": "Ativo"}
                         if v_idx == -1: df_v = pd.concat([df_v, pd.DataFrame([nova])], ignore_index=True)
-                        else:
+                        else: 
                             for k, v in nova.items(): df_v.at[v_idx, k] = v
                         salvar(df_v, ARQ_VEIC); st.session_state.edit_v_idx = -1; st.rerun()
         for i, r in df_v.iterrows():
@@ -112,7 +111,7 @@ with tabs[0]:
                 if st.form_submit_button("Salvar"):
                     if m_nome and m_cnh:
                         nova = {"Nome": m_nome, "Validade_CNH": m_cnh, "Status": "Ativo"}
-                        if m_edit == -1 if 'm_edit' in locals() else m_idx == -1: df_m = pd.concat([df_m, pd.DataFrame([nova])], ignore_index=True)
+                        if m_idx == -1: df_m = pd.concat([df_m, pd.DataFrame([nova])], ignore_index=True)
                         else:
                             for k, v in nova.items(): df_m.at[m_idx, k] = v
                         salvar(df_m, ARQ_MOT); st.session_state.edit_m_idx = -1; st.rerun()
@@ -137,20 +136,20 @@ with tabs[0]:
 # --- ABA 2: SAÍDA ---
 with tabs[1]:
     st.header("📤 Registrar Saída")
-    df_v_ativos = carregar(ARQ_VEIC)[carregar(ARQ_VEIC)['Status'] == "Ativo"]
-    df_m_ativos = carregar(ARQ_MOT)[carregar(ARQ_MOT)['Status'] == "Ativo"]
+    df_v_at = carregar(ARQ_VEIC)[carregar(ARQ_VEIC)['Status'] == "Ativo"]
+    df_m_at = carregar(ARQ_MOT)[carregar(ARQ_MOT)['Status'] == "Ativo"]
     p_lista = carregar(ARQ_PECAS)['Item'].tolist()
     
-    v_s = st.selectbox("Selecione o Veículo", ["Selecione..."] + [f"{r['Veículo']} ({r['Placa']})" for _, r in df_v_ativos.iterrows()])
-    m_s = st.selectbox("Selecione o Motorista", ["Selecione..."] + df_m_ativos['Nome'].tolist())
+    v_s = st.selectbox("Selecione o Veículo", ["Selecione..."] + [f"{r['Veículo']} ({r['Placa']})" for _, r in df_v_at.iterrows()])
+    m_s = st.selectbox("Selecione o Motorista", ["Selecione..."] + df_m_at['Nome'].tolist())
 
     if v_s != "Selecione..." and m_s != "Selecione...":
         st_v = get_status_veiculo(v_s)
-        info_m = df_m_ativos[df_m_ativos['Nome'] == m_s].iloc[0]
+        info_m = df_m_at[df_m_at['Nome'] == m_s].iloc[0]
         dt_cnh = datetime.strptime(str(info_m['Validade_CNH']), '%Y-%m-%d').date()
         
-        # Alertas de Revisão
-        v_info = df_v_ativos[df_v_ativos['Placa'] == v_s.split("(")[1].replace(")", "")].iloc[0]
+        # Alerta Revisão
+        v_info = df_v_at[df_v_at['Placa'] == v_s.split("(")[1].replace(")", "")].iloc[0]
         prox_km = int(v_info['Ult_Revisao_KM']) + int(v_info['Intervalo_KM'])
         if st_v['km'] >= (prox_km - 500): st.warning(f"⚠️ Revisão Próxima: {prox_km} KM")
         
@@ -188,6 +187,7 @@ with tabs[2]:
                     "Av_Saida": st_ret['av'], "Av_Chegada": txt_n, "Av_Totais": " | ".join(l_b) if l_b else "Nenhuma", "Obs": "Retorno", "Foto_Base64": converter_foto(foto_c)
                 }])
                 salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.success("Registrado!"); st.rerun()
+    else: st.info("Veículo no pátio.")
 
 # --- ABA 4: MANUTENÇÃO ---
 with tabs[3]:
@@ -195,7 +195,7 @@ with tabs[3]:
     v_m = st.selectbox("Veículo oficina", ["Selecione..."] + [f"{r['Veículo']} ({r['Placa']})" for _, r in carregar(ARQ_VEIC).iterrows()])
     if v_m != "Selecione...":
         st_manut = get_status_veiculo(v_m)
-        if st_manut["av"] != "Nenhuma" and st.button("🛠️ Limpar Avarias (Conserto)"):
+        if st_manut["av"] != "Nenhuma" and st.button("🛠️ Limpar Avarias"):
             nova = pd.DataFrame([{
                 "Data": get_data_hora_br(),
                 "Ação": "REPARO", "Veículo": v_m, "Usuário": "Oficina", "KM": st_manut['km'], "CNH": "", "Av_Saida": "Conserto", "Av_Chegada": "", "Av_Totais": "Nenhuma", "Obs": "Reparo", "Foto_Base64": ""
@@ -218,4 +218,3 @@ with tabs[4]:
                 if st.button("🗑️ Excluir Foto"):
                     df_h.at[idx_foto, "Foto_Base64"] = ""
                     salvar(df_h, ARQ_HIST); st.rerun()
-            else: st.info("Sem foto.")
