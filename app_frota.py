@@ -47,7 +47,6 @@ def get_status_veiculo(v_alvo):
             ult = df_v.iloc[-1]
             try: km_val = int(float(ult['KM']))
             except: km_val = 0
-            # Captura avarias atuais (Av_Totais) limpando valores nulos
             av_raw = str(ult['Av_Totais']).strip()
             av_limpa = av_raw if av_raw != "" and av_raw.lower() != "nan" and av_raw.lower() != "nenhuma" else "Nenhuma"
             return {"acao": ult['Ação'], "user": ult['Usuário'], "km": km_val, "av": av_limpa}
@@ -159,23 +158,25 @@ with tabs[1]:
     df_va = carregar(ARQ_VEIC)[carregar(ARQ_VEIC)['Status'] == "Ativo"]
     vs = st.selectbox("Veículo", [""] + [f"{r['Veículo']} ({r['Placa']})" for _, r in df_va.iterrows()], key=f"vs_{st.session_state.reset_key}")
     ms = st.session_state.user_logado if st.session_state.perfil == "motorista" else st.selectbox("Motorista", [""] + carregar(ARQ_MOT)['Nome'].tolist(), key=f"ms_{st.session_state.reset_key}")
+    
     if vs and ms:
         stv = get_status_veiculo(vs); vi = df_va[df_va['Placa'] == vs.split('(')[1].replace(')','')].iloc[0]
         sr, mr = calcular_revisao(vi, stv['km']); st.info(f"STATUS REVISÃO: {sr} | {mr}")
         
-        # MOSTRAR ESTADO ATUAL (AVARIAS REGISTRADAS)
-        st.write(f"🔍 **Estado Atual do Veículo:** {stv['av']}")
+        # 🔍 Exibição do Estado Atual
+        st.markdown(f"🔍 **Estado Atual do Veículo:** {stv['av']}")
         
         if stv["acao"] == "SAÍDA": st.error(f"Veículo em uso por {stv['user']}.")
         else:
             kms = st.number_input("KM Inicial*", min_value=stv['km'], value=stv['km'], key=f"kms_{st.session_state.reset_key}")
             
-            # Checklist de Avarias: Itens pré-selecionados se já existirem no veículo
+            # Checklist: Itens fixos + novas marcações
             lista_pecas = carregar(ARQ_PECAS)['Item'].tolist()
+            # Identifica quais das avarias atuais estão na lista oficial para pré-marcar
             av_existentes = [x.strip() for x in stv['av'].split(",") if x.strip() in lista_pecas]
             
-            chk_s = st.multiselect("Checklist de Avarias (Marque as novas ou mantenha as existentes):", lista_pecas, default=av_existentes, key=f"chs_{st.session_state.reset_key}")
-            fts_s = st.file_uploader("Fotos da Saída", accept_multiple_files=True, key=f"fs_{st.session_state.reset_key}")
+            chk_s = st.multiselect("Checklist de Avarias (Marque novos danos ou confirme os atuais):", lista_pecas, default=av_existentes, key=f"chs_{st.session_state.reset_key}")
+            fts_s = st.file_uploader("Fotos da Saída (Múltiplas)", accept_multiple_files=True, key=f"fs_{st.session_state.reset_key}")
             
             if st.button("Confirmar Saída"):
                 nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "SAÍDA", "Veículo": vs, "Usuário": ms, "KM": str(kms), "Av_Saida": ", ".join(chk_s), "Av_Totais": ", ".join(chk_s), "Foto_Base64": converter_multiplas_fotos(fts_s)}])
@@ -190,33 +191,33 @@ with tabs[2]:
         str_r = get_status_veiculo(vr)
         kmf = st.number_input("KM Final*", min_value=str_r['km'], value=str_r['km'], key=f"kmr_{st.session_state.reset_key}")
         
-        # Checklist Chegada: Mostra o que saiu e permite marcar novas avarias
         lista_pecas = carregar(ARQ_PECAS)['Item'].tolist()
         av_saida = [x.strip() for x in str_r['av'].split(",") if x.strip() in lista_pecas]
         
-        st.write(f"⚠️ **Avarias na Saída:** {str_r['av']}")
+        st.markdown(f"⚠️ **Avarias registradas na Saída:** {str_r['av']}")
         chk_c = st.multiselect("Checklist de Chegada (Informe se houve novas avarias):", lista_pecas, default=av_saida, key=f"chc_{st.session_state.reset_key}")
-        fts_c = st.file_uploader("Fotos da Chegada", accept_multiple_files=True, key=f"fc_{st.session_state.reset_key}")
+        fts_c = st.file_uploader("Fotos da Chegada (Múltiplas)", accept_multiple_files=True, key=f"fc_{st.session_state.reset_key}")
         
         if st.button("Confirmar Chegada"):
-            nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "CHEGADA", "Veículo": vr, "Usuário": str_r['user'], "KM": str(kmf), "Av_Saida": str_r['av'], "Av_Chegada": ", ".join(chk_c), "Av_Totais": ", ".join(chk_c), "Foto_Base64": converter_multiplas_fotos(fts_c)}])
+            # Consolida o que já tinha com o que foi marcado agora
+            av_finais = list(set(av_saida + chk_c))
+            nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "CHEGADA", "Veículo": vr, "Usuário": str_r['user'], "KM": str(kmf), "Av_Saida": str_r['av'], "Av_Chegada": ", ".join(chk_c), "Av_Totais": ", ".join(av_finais) if av_finais else "Nenhuma", "Foto_Base64": converter_multiplas_fotos(fts_c)}])
             salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.session_state.reset_key += 1; st.rerun()
 
 # --- ABA OFICINA ---
 with tabs[3]:
-    st.header("🔧 Manutenção / Oficina")
+    st.header("🔧 Oficina")
     veic_av = [v for v in [f"{r['Veículo']} ({r['Placa']})" for _, r in carregar(ARQ_VEIC).iterrows()] if get_status_veiculo(v)["av"] != "Nenhuma"]
-    vm = st.selectbox("Veículo em Manutenção", [""] + veic_av, key=f"vm_{st.session_state.reset_key}")
-    if vm:
-        sm = get_status_veiculo(vm)
-        pecas_av = [x.strip() for x in sm['av'].split(",") if x.strip() != "Nenhuma"]
-        reparados = st.multiselect("Selecione os itens reparados:", pecas_av)
+    v_of = st.selectbox("Veículo para Reparo", [""] + veic_av, key=f"vof_{st.session_state.reset_key}")
+    if v_of:
+        st_of = get_status_veiculo(v_of)
+        pecas_ruins = [x.strip() for x in st_of['av'].split(",") if x.strip() != "Nenhuma"]
+        reparados = st.multiselect("Selecione os itens consertados:", pecas_ruins)
         loc = st.text_input("Oficina / Local")
-        val = st.text_input("Valor do Reparo (R$)")
+        val = st.text_input("Valor (R$)")
         if st.button("Registrar Reparo"):
-            restantes = [p for p in pecas_av if p not in reparados]
-            av_pos = ", ".join(restantes) if restantes else "Nenhuma"
-            nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "REPARO", "Veículo": vm, "Usuário": st.session_state.user_logado, "KM": str(sm['km']), "Av_Totais": av_pos, "Local_Reparo": loc, "Valor_Reparo": val, "Obs": f"Reparado: {', '.join(reparados)}"}])
+            restantes = [p for p in pecas_ruins if p not in reparados]
+            nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "REPARO", "Veículo": v_of, "Usuário": st.session_state.user_logado, "KM": str(st_of['km']), "Av_Totais": ", ".join(restantes) if restantes else "Nenhuma", "Local_Reparo": loc, "Valor_Reparo": val, "Obs": f"Reparado: {', '.join(reparados)}"}])
             salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.session_state.reset_key += 1; st.rerun()
 
 # --- ABA HISTÓRICO ---
@@ -224,8 +225,8 @@ with tabs[4]:
     st.header("📋 Histórico")
     df_h = carregar(ARQ_HIST)
     if not df_h.empty:
-        idx = st.selectbox("ID:", df_h.index)
-        if st.session_state.perfil == "admin" and st.button("🗑️ Excluir"): salvar(df_h.drop(idx), ARQ_HIST); st.rerun()
+        idx = st.selectbox("Ver Detalhes (ID):", df_h.index)
+        if st.session_state.perfil == "admin" and st.button("🗑️ Excluir Registro"): salvar(df_h.drop(idx), ARQ_HIST); st.rerun()
         st.dataframe(df_h.drop(columns=["Foto_Base64"]), use_container_width=True)
         fb64 = df_h.iloc[idx]["Foto_Base64"]
         if fb64:
