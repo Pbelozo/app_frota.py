@@ -15,15 +15,14 @@ ARQ_VEIC = "cadastro_veiculos.csv"
 ARQ_MOT  = "cadastro_motoristas.csv"
 ARQ_PECAS = "cadastro_pecas.csv"
 
-# 3. Inicialização e Integridade
+# 3. Inicialização e Integridade de Dados
 def inicializar():
     col_h = ["Data", "Ação", "Veículo", "Usuário", "KM", "CNH", "Av_Saida", "Av_Chegada", "Av_Totais", "Obs", "Valor_Reparo", "Local_Reparo", "Foto_Base64"]
     if not os.path.exists(ARQ_HIST): pd.DataFrame(columns=col_h).to_csv(ARQ_HIST, index=False)
     if not os.path.exists(ARQ_MOT): pd.DataFrame(columns=["Nome", "Validade_CNH", "Status", "Senha", "Admin"]).to_csv(ARQ_MOT, index=False)
     
     col_v = ["Veículo", "Placa", "Ult_Revisao_KM", "Ult_Revisao_Data", "Int_KM", "Int_Meses", "Alert_KM", "Alert_Dias", "Status"]
-    if not os.path.exists(ARQ_VEIC): 
-        pd.DataFrame(columns=col_v).to_csv(ARQ_VEIC, index=False)
+    if not os.path.exists(ARQ_VEIC): pd.DataFrame(columns=col_v).to_csv(ARQ_VEIC, index=False)
 
     if not os.path.exists(ARQ_PECAS):
         pecas_15 = [
@@ -50,7 +49,7 @@ def get_status_veiculo(v_alvo):
             ult = df_v.iloc[-1]
             try: km_val = int(float(ult['KM']))
             except: km_val = 0
-            return {"acao": ult['Ação'], "user": ult['Usuário'], "km": km_val, "av": str(ult['Av_Totais']) if str(ult['Av_Totais']).strip() != "" else "Nenhuma"}
+            return {"acao": ult['Ação'], "user": ult['Usuário'], "km": km_val, "av": str(ult['Av_Totais']) if str(ult['Av_Totais']).strip() != "" and str(ult['Av_Totais']) != "nan" else "Nenhuma"}
     return {"acao": "CHEGADA", "user": "Ninguém", "km": 0, "av": "Nenhuma"}
 
 def calcular_revisao(v_info, km_atual):
@@ -149,6 +148,13 @@ with tabs[0]:
                 if st.button("📝", key=f"eu{i}"): st.session_state.edit_u_idx = i; st.rerun()
                 if st.button("🗑️", key=f"du{i}"): salvar(df_u.drop(i), ARQ_MOT); st.rerun()
 
+    with c3:
+        st.subheader("📋 Configuração de Avarias")
+        df_a = carregar(ARQ_PECAS); na = st.text_input("Novo Código/Peça")
+        if st.button("Adicionar Item"): 
+            if na: salvar(pd.concat([df_a, pd.DataFrame([{"Item": na, "Status": "Ativo"}])], ignore_index=True), ARQ_PECAS); st.rerun()
+        st.dataframe(df_a, height=400)
+
 # --- ABA SAÍDA ---
 with tabs[1]:
     st.header("📤 Registrar Saída")
@@ -157,12 +163,13 @@ with tabs[1]:
     ms = st.session_state.user_logado if st.session_state.perfil == "motorista" else st.selectbox("Motorista", [""] + carregar(ARQ_MOT)['Nome'].tolist(), key=f"ms_{st.session_state.reset_key}")
     if vs and ms:
         stv = get_status_veiculo(vs); vi = df_va[df_va['Placa'] == vs.split('(')[1].replace(')','')].iloc[0]
-        sr, mr = calcular_revisao(vi, stv['km']); st.info(f"REVISÃO: {sr} | {mr}")
-        if stv["acao"] == "SAÍDA": st.error(f"Em uso por {stv['user']}.")
+        sr, mr = calcular_revisao(vi, stv['km']); st.info(f"STATUS REVISÃO: {sr} | {mr}")
+        if stv["acao"] == "SAÍDA": st.error(f"Veículo em uso por {stv['user']}.")
         else:
             kms = st.number_input("KM Inicial*", min_value=stv['km'], value=stv['km'], key=f"kms_{st.session_state.reset_key}")
-            chk_s = st.multiselect("Checklist de Saída:", carregar(ARQ_PECAS)['Item'].tolist(), key=f"chs_{st.session_state.reset_key}")
-            fts_s = st.file_uploader("Fotos Saída", accept_multiple_files=True, key=f"fs_{st.session_state.reset_key}")
+            # Checklist de Avarias na Saída Restaurado
+            chk_s = st.multiselect("Checklist de Avarias (Saída):", carregar(ARQ_PECAS)['Item'].tolist(), key=f"chs_{st.session_state.reset_key}")
+            fts_s = st.file_uploader("Fotos da Saída", accept_multiple_files=True, key=f"fs_{st.session_state.reset_key}")
             if st.button("Confirmar Saída"):
                 nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "SAÍDA", "Veículo": vs, "Usuário": ms, "KM": str(kms), "Av_Saida": ", ".join(chk_s), "Av_Totais": ", ".join(chk_s), "Foto_Base64": converter_multiplas_fotos(fts_s)}])
                 salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.session_state.reset_key += 1; st.rerun()
@@ -175,23 +182,26 @@ with tabs[2]:
     if vr:
         str_r = get_status_veiculo(vr)
         kmf = st.number_input("KM Final*", min_value=str_r['km'], value=str_r['km'], key=f"kmr_{st.session_state.reset_key}")
+        # Checklist de Avarias na Chegada Restaurado
         chk_c = st.multiselect("Checklist de Chegada (Novas Avarias):", carregar(ARQ_PECAS)['Item'].tolist(), key=f"chc_{st.session_state.reset_key}")
-        fts_c = st.file_uploader("Fotos Chegada", accept_multiple_files=True, key=f"fc_{st.session_state.reset_key}")
+        fts_c = st.file_uploader("Fotos da Chegada", accept_multiple_files=True, key=f"fc_{st.session_state.reset_key}")
         if st.button("Confirmar Chegada"):
-            # Consolida avarias (anteriores + novas)
+            # Consolida avarias anteriores com as novas
             av_finais = list(set([x.strip() for x in str_r['av'].split(",") if x.strip() and x.strip() != "Nenhuma"] + chk_c))
             nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "CHEGADA", "Veículo": vr, "Usuário": str_r['user'], "KM": str(kmf), "Av_Saida": str_r['av'], "Av_Chegada": ", ".join(chk_c), "Av_Totais": ", ".join(av_finais) if av_finais else "Nenhuma", "Foto_Base64": converter_multiplas_fotos(fts_c)}])
             salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.session_state.reset_key += 1; st.rerun()
 
 # --- ABA HISTÓRICO ---
 with tabs[4]:
-    st.header("📋 Histórico")
+    st.header("📋 Histórico Geral")
     df_h = carregar(ARQ_HIST)
     if not df_h.empty:
-        idx = st.selectbox("Detalhes ID:", df_h.index)
-        if st.session_state.perfil == "admin" and st.button("🗑️ Excluir Registro"): salvar(df_h.drop(idx), ARQ_HIST); st.rerun()
+        idx = st.selectbox("ID do Registro para Detalhes:", df_h.index)
+        if st.session_state.perfil == "admin" and st.button("🗑️ Excluir este Registro"): 
+            salvar(df_h.drop(idx), ARQ_HIST); st.rerun()
         st.dataframe(df_h.drop(columns=["Foto_Base64"]), use_container_width=True)
         fb64 = df_h.iloc[idx]["Foto_Base64"]
         if fb64:
+            st.subheader("Evidências Fotográficas")
             for f in str(fb64).split(";"):
                 if f: st.image(base64.b64decode(f), width=450)
