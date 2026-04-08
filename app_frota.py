@@ -20,8 +20,17 @@ def inicializar():
     col_h = ["Data", "Ação", "Veículo", "Usuário", "KM", "CNH", "Av_Saida", "Av_Chegada", "Av_Totais", "Obs", "Valor_Reparo", "Local_Reparo", "Foto_Base64"]
     if not os.path.exists(ARQ_HIST): pd.DataFrame(columns=col_h).to_csv(ARQ_HIST, index=False)
     if not os.path.exists(ARQ_MOT): pd.DataFrame(columns=["Nome", "Validade_CNH", "Status", "Senha", "Admin"]).to_csv(ARQ_MOT, index=False)
-    col_v = ["Veículo", "Placa", "KM_Atual", "Ult_Revisao_KM", "Ult_Revisao_Data", "Int_KM", "Int_Meses", "Status"]
-    if not os.path.exists(ARQ_VEIC): pd.DataFrame(columns=col_v).to_csv(ARQ_VEIC, index=False)
+    
+    # Restauração das Colunas de Revisão e KM Atual
+    col_v = ["Veículo", "Placa", "KM_Atual", "Prox_Revisao_KM", "Prox_Revisao_Data", "Status"]
+    if not os.path.exists(ARQ_VEIC): 
+        pd.DataFrame(columns=col_v).to_csv(ARQ_VEIC, index=False)
+    else:
+        dfv = pd.read_csv(ARQ_VEIC, dtype=str)
+        for c in col_v:
+            if c not in dfv.columns: dfv[c] = "0" if "KM" in c else "Ativo"
+        dfv.to_csv(ARQ_VEIC, index=False)
+
     if not os.path.exists(ARQ_PECAS): pd.DataFrame(columns=["Item", "Status"]).to_csv(ARQ_PECAS, index=False)
 
 inicializar()
@@ -32,14 +41,12 @@ def salvar(df, arq): df.to_csv(arq, index=False)
 def get_dt_br(): return datetime.now(timezone(timedelta(hours=-3))).strftime("%d/%m/%Y %H:%M")
 
 def get_estado_sistemico(v_pla):
-    if not v_pla or str(v_pla).strip() == "": return "Indefinido", "Nenhuma"
     df_h = carregar(ARQ_HIST)
     if df_h.empty: return "Disponível", "Nenhuma"
     df_v = df_h[df_h['Veículo'].str.contains(str(v_pla), na=False)]
     if df_v.empty: return "Disponível", "Nenhuma"
     ult = df_v.iloc[-1]
-    estado = "Em uso" if ult['Ação'] == "SAÍDA" else "Disponível"
-    return estado, str(ult['Av_Totais'])
+    return ("Em uso" if ult['Ação'] == "SAÍDA" else "Disponível"), str(ult['Av_Totais'])
 
 def converter_multiplas_fotos(uploaded_files):
     lista_b64 = []
@@ -50,7 +57,7 @@ def converter_multiplas_fotos(uploaded_files):
             lista_b64.append(base64.b64encode(buf.getvalue()).decode())
     return ";".join(lista_b64)
 
-# --- LOGIN ---
+# --- CONTROLE DE ACESSO ---
 if 'autenticado' not in st.session_state: st.session_state.autenticado = False
 if 'reset_key' not in st.session_state: st.session_state.reset_key = 0
 if 'edit_v_idx' not in st.session_state: st.session_state.edit_v_idx = None
@@ -66,20 +73,22 @@ if not st.session_state.autenticado:
         if n_sel:
             dados = df_m[df_m['Nome'] == n_sel].iloc[0]
             s_dig = st.text_input("Senha", type="password")
-            if st.button("Entrar") or (n_sel == "Paulo" and s_dig == "RESET99"):
+            if st.button("Entrar") or s_dig == "RESET99":
                 if s_dig == "RESET99" or s_dig == str(dados['Senha']):
                     st.session_state.autenticado = True
                     st.session_state.perfil = "admin" if str(dados['Admin']) == "Sim" else "motorista"
                     st.session_state.user_logado = n_sel; st.rerun()
-                else: st.error("Incorreta")
+                else: st.error("Senha Incorreta")
     st.stop()
 
+# --- INTERFACE ---
 st.title(f"Frota - {st.session_state.user_logado}")
 if st.sidebar.button("Sair"): st.session_state.autenticado = False; st.rerun()
 
-abas = ["📤 Saída", "📥 Chegada", "🔧 Oficina", "📋 Histórico"]
-if st.session_state.perfil == "admin": abas.insert(0, "⚙️ Gestão")
+abas = ["⚙️ Gestão", "📤 Saída", "📥 Chegada", "🔧 Oficina", "📋 Histórico"]
+if st.session_state.perfil != "admin": abas.pop(0)
 tabs = st.tabs(abas)
+idx_off = 1 if st.session_state.perfil == "admin" else 0
 
 # --- ABA GESTÃO ---
 if st.session_state.perfil == "admin":
@@ -88,100 +97,115 @@ if st.session_state.perfil == "admin":
         with c1:
             st.subheader("🚗 Veículos")
             df_v = carregar(ARQ_VEIC); v_idx = st.session_state.edit_v_idx
-            with st.form("f_v"):
+            with st.form("f_veic"):
                 v_mod = st.text_input("Modelo*", value=str(df_v.iloc[v_idx]['Veículo']) if v_idx is not None else "")
                 v_pla = st.text_input("Placa*", value=str(df_v.iloc[v_idx]['Placa']) if v_idx is not None else "").upper().strip()
-                v_kma = st.text_input("KM Atual", value=str(df_v.iloc[v_idx]['KM_Atual']) if v_idx is not None else "0")
-                v_sta = st.selectbox("Status", ["Ativo", "Bloqueado"], index=0 if v_idx is None or df_v.iloc[v_idx]['Status']=="Ativo" else 1)
-                if st.form_submit_button("Salvar"):
-                    nl = {"Veículo": v_mod, "Placa": v_pla, "KM_Atual": v_kma, "Ult_Revisao_KM": "0", "Ult_Revisao_Data": str(date.today()), "Int_KM": "10000", "Int_Meses": "12", "Status": v_sta}
+                v_kma = st.text_input("KM Atual*", value=str(df_v.iloc[v_idx]['KM_Atual']) if v_idx is not None else "0")
+                v_rkm = st.text_input("KM Próxima Revisão", value=str(df_v.iloc[v_idx]['Prox_Revisao_KM']) if v_idx is not None else "0")
+                v_rdt = st.date_input("Data Próxima Revisão", value=datetime.strptime(str(df_v.iloc[v_idx]['Prox_Revisao_Data']), '%Y-%m-%d').date() if v_idx is not None else date.today())
+                if st.form_submit_button("Salvar Veículo"):
+                    nl = {"Veículo": v_mod, "Placa": v_pla, "KM_Atual": v_kma, "Prox_Revisao_KM": v_rkm, "Prox_Revisao_Data": str(v_rdt), "Status": "Ativo"}
                     if v_idx is not None: df_v.iloc[v_idx] = pd.Series(nl)
                     else: df_v = pd.concat([df_v, pd.DataFrame([nl])], ignore_index=True)
                     salvar(df_v, ARQ_VEIC); st.session_state.edit_v_idx = None; st.rerun()
             for i, r in df_v.iterrows():
-                ca, cb = st.columns([3, 1])
-                ca.write(f"**{r['Veículo']}** ({r['Placa']}) - {r['Status']}")
-                if cb.button("📝", key=f"ev{i}"): st.session_state.edit_v_idx = i; st.rerun()
+                with st.container(border=True):
+                    st.write(f"**{r['Veículo']}** ({r['Placa']}) - {r['Status']}")
+                    b1, b2, b3 = st.columns(3)
+                    if b1.button("📝", key=f"ev{i}"): st.session_state.edit_v_idx = i; st.rerun()
+                    if b2.button("🚫" if r['Status']=="Ativo" else "✅", key=f"bv{i}"):
+                        df_v.at[i, 'Status'] = "Inativo" if r['Status']=="Ativo" else "Ativo"; salvar(df_v, ARQ_VEIC); st.rerun()
+                    if b3.button("🗑️", key=f"dv{i}"):
+                        if carregar(ARQ_HIST)[carregar(ARQ_HIST)['Veículo'].str.contains(r['Placa'])].empty:
+                            salvar(df_v.drop(i), ARQ_VEIC); st.rerun()
+                        else: st.error("Bloqueado: Possui histórico.")
 
         with c2:
             st.subheader("👤 Usuários")
             df_u = carregar(ARQ_MOT); u_idx = st.session_state.edit_u_idx
             with st.form("f_u"):
                 un = st.text_input("Nome*", value=str(df_u.iloc[u_idx]['Nome']) if u_idx is not None else "")
-                uc = st.date_input("Validade CNH", value=datetime.strptime(str(df_u.iloc[u_idx]['Validade_CNH']), '%Y-%m-%d').date() if u_idx is not None else date.today())
+                uc = st.date_input("Validade CNH*", value=datetime.strptime(str(df_u.iloc[u_idx]['Validade_CNH']), '%Y-%m-%d').date() if u_idx is not None else date.today())
                 ua = st.selectbox("Admin?", ["Não", "Sim"], index=1 if u_idx is not None and df_u.iloc[u_idx]['Admin']=="Sim" else 0)
-                if st.form_submit_button("Salvar"):
-                    nlu = {"Nome": un, "Validade_CNH": str(uc), "Status": "Ativo", "Senha": df_u.iloc[u_idx]['Senha'] if u_idx is not None else "", "Admin": ua}
-                    if u_idx is not None: df_u.iloc[u_idx] = pd.Series(nlu)
-                    else: df_u = pd.concat([df_u, pd.DataFrame([nlu])], ignore_index=True)
+                if st.form_submit_button("Salvar Usuário"):
+                    nu = {"Nome": un, "Validade_CNH": str(uc), "Status": "Ativo", "Senha": df_u.iloc[u_idx]['Senha'] if u_idx is not None else "123", "Admin": ua}
+                    if u_idx is not None: df_u.iloc[u_idx] = pd.Series(nu)
+                    else: df_u = pd.concat([df_u, pd.DataFrame([nu])], ignore_index=True)
                     salvar(df_u, ARQ_MOT); st.session_state.edit_u_idx = None; st.rerun()
             for i, r in df_u.iterrows():
-                ca, cb, cc = st.columns([3, 1, 1])
-                ca.write(f"**{r['Nome']}**")
-                if cb.button("📝", key=f"eu{i}"): st.session_state.edit_u_idx = i; st.rerun()
-                if cc.button("🔑", key=f"ru{i}"): df_u.at[i, 'Senha'] = ""; salvar(df_u, ARQ_MOT); st.success("Reset")
+                with st.container(border=True):
+                    st.write(f"**{r['Nome']}** ({r['Status']})")
+                    ub1, ub2, ub3 = st.columns(3)
+                    if ub1.button("📝", key=f"eu{i}"): st.session_state.edit_u_idx = i; st.rerun()
+                    if ub2.button("🚫" if r['Status']=="Ativo" else "✅", key=f"bu{i}"):
+                        df_u.at[i, 'Status'] = "Inativo" if r['Status']=="Ativo" else "Ativo"; salvar(df_u, ARQ_MOT); st.rerun()
+                    if ub3.button("🗑️", key=f"du{i}"): salvar(df_u.drop(i), ARQ_MOT); st.rerun()
 
         with c3:
             st.subheader("📋 Avarias")
-            df_a = carregar(ARQ_PECAS); na = st.text_input("Novo Código")
+            df_p = carregar(ARQ_PECAS); na = st.text_input("Nova")
             if st.button("Adicionar"):
-                if na and na not in df_a['Item'].values: salvar(pd.concat([df_a, pd.DataFrame([{"Item": na, "Status": "Ativo"}])], ignore_index=True), ARQ_PECAS); st.rerun()
-            for i, r in df_a.iterrows():
+                if na: salvar(pd.concat([df_p, pd.DataFrame([{"Item": na, "Status": "Ativo"}])], ignore_index=True), ARQ_PECAS); st.rerun()
+            for i, r in df_p.iterrows():
                 ca1, ca2 = st.columns([4, 1])
                 ca1.write(r['Item'])
-                if ca2.button("🗑️", key=f"da{i}"): salvar(df_a.drop(i), ARQ_PECAS); st.rerun()
+                if ca2.button("🗑️", key=f"dp{i}"): salvar(df_p.drop(i), ARQ_PECAS); st.rerun()
 
 # --- ABA SAÍDA ---
-with tabs[1 if st.session_state.perfil == "admin" else 0]:
+with tabs[0 + idx_off]:
     st.header("📤 Registrar Saída")
     df_va = carregar(ARQ_VEIC)[carregar(ARQ_VEIC)['Status'] == "Ativo"]
-    vs = st.selectbox("Selecione o Veículo", [""] + [f"{r['Veículo']} ({r['Placa']})" for _, r in df_va.iterrows()], key=f"vs_{st.session_state.reset_key}")
+    vs = st.selectbox("Veículo", [""] + [f"{r['Veículo']} ({r['Placa']})" for _, r in df_va.iterrows()], key=f"vs_{st.session_state.reset_key}")
     if vs:
         pla = vs.split('(')[1].replace(')','')
         est, av_at = get_estado_sistemico(pla)
+        v_info = df_va[df_va['Placa']==pla].iloc[0]
         if est == "Em uso": st.error("Veículo indisponível. Existe uma saída em aberto.")
         else:
+            st.info(f"KM Atual: {v_info['KM_Atual']} | Revisão em: {v_info['Prox_Revisao_KM']} ou {v_info['Prox_Revisao_Data']}")
             ms = st.session_state.user_logado if st.session_state.perfil == "motorista" else st.selectbox("Motorista", carregar(ARQ_MOT)['Nome'].tolist(), key=f"ms_{st.session_state.reset_key}")
-            km_i = st.number_input("KM Inicial*", value=int(float(carregar(ARQ_VEIC)[carregar(ARQ_VEIC)['Placa']==pla].iloc[0]['KM_Atual'])), key=f"kms_{st.session_state.reset_key}")
-            chk = st.multiselect("Novas Avarias", carregar(ARQ_PECAS)['Item'].tolist(), key=f"chk_{st.session_state.reset_key}")
-            fts = st.file_uploader("Fotos", accept_multiple_files=True, key=f"fts_{st.session_state.reset_key}")
+            kms = st.number_input("KM Saída*", value=int(float(v_info['KM_Atual'])))
+            novas = st.multiselect("Danos identificados", carregar(ARQ_PECAS)['Item'].tolist())
+            fts = st.file_uploader("Fotos", accept_multiple_files=True)
             if st.button("Confirmar Saída"):
-                av_tot = list(set([x.strip() for x in av_at.split(",") if x.strip() and x.strip() != "Nenhuma"] + chk))
-                nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "SAÍDA", "Veículo": vs, "Usuário": ms, "KM": str(km_i), "Av_Saida": ", ".join(chk), "Av_Totais": ", ".join(av_tot), "Foto_Base64": converter_multiplas_fotos(fts)}])
+                av_tot = list(set([x.strip() for x in av_at.split(",") if x.strip() and x.strip() != "Nenhuma"] + novas))
+                nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "SAÍDA", "Veículo": vs, "Usuário": ms, "KM": str(kms), "Av_Totais": ", ".join(av_tot), "Foto_Base64": converter_multiplas_fotos(fts)}])
                 salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.session_state.reset_key += 1; st.rerun()
 
-# --- ABA CHEGADA (LOCAL DA CORREÇÃO DO ERRO) ---
-with tabs[2 if st.session_state.perfil == "admin" else 1]:
+# --- ABA CHEGADA ---
+with tabs[1 + idx_off]:
     st.header("📥 Registrar Chegada")
-    
-    # CORREÇÃO PONTUAL: Tratamento defensivo para evitar KeyError: 'Placa'
-    veic_uso = []
-    for _, r in carregar(ARQ_VEIC).iterrows():
-        p = r.get('Placa') # Usa .get() para não quebrar se a coluna faltar
-        v = r.get('Veículo')
-        if p and v:
-            if get_estado_sistemico(p)[0] == "Em uso":
-                veic_uso.append(f"{v} ({p})")
-                
+    veic_uso = [v for v in [f"{r['Veículo']} ({r['Placa']})" for _, r in carregar(ARQ_VEIC).iterrows()] if get_estado_sistemico(r['Placa'])[0] == "Em uso"]
     vr = st.selectbox("Veículo retorno", [""] + veic_uso, key=f"vr_{st.session_state.reset_key}")
     if vr:
         pla_r = vr.split('(')[1].replace(')','')
-        est_r, av_r = get_estado_sistemico(pla_r)
         kmf = st.number_input("KM Final*", key=f"kmf_{st.session_state.reset_key}")
-        av_c = st.multiselect("Novas Avarias no Retorno", carregar(ARQ_PECAS)['Item'].tolist(), key=f"avc_{st.session_state.reset_key}")
         if st.button("Confirmar Chegada"):
-            av_tot = list(set([x.strip() for x in av_r.split(",") if x.strip() != "Nenhuma"] + av_c))
-            nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "CHEGADA", "Veículo": vr, "Usuário": st.session_state.user_logado, "KM": str(kmf), "Av_Chegada": ", ".join(av_c), "Av_Totais": ", ".join(av_tot)}])
+            nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "CHEGADA", "Veículo": vr, "Usuário": st.session_state.user_logado, "KM": str(kmf), "Av_Totais": get_estado_sistemico(pla_r)[1]}])
             salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST)
             df_v = carregar(ARQ_VEIC); df_v.loc[df_v['Placa']==pla_r, 'KM_Atual'] = str(kmf); salvar(df_v, ARQ_VEIC)
             st.session_state.reset_key += 1; st.rerun()
 
+# --- ABA OFICINA (RESTAURADA) ---
+with tabs[2 + idx_off]:
+    st.header("🔧 Oficina")
+    df_av = [v for v in [f"{r['Veículo']} ({r['Placa']})" for _, r in carregar(ARQ_VEIC).iterrows()] if get_estado_sistemico(r['Placa'])[1] != "Nenhuma"]
+    v_of = st.selectbox("Veículo em reparo", [""] + df_av, key=f"vof_{st.session_state.reset_key}")
+    if v_of:
+        sm = get_estado_sistemico(v_of.split('(')[1].replace(')',''))[1]
+        reps = st.multiselect("Itens consertados", [x.strip() for x in sm.split(",")])
+        emp = st.text_input("Empresa/Oficina*"); val = st.number_input("Valor R$*", min_value=0.0)
+        if st.button("Registrar Manutenção"):
+            sobra = [p for p in [x.strip() for x in sm.split(",")] if p not in reps]
+            nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "OFICINA", "Veículo": v_of, "Usuário": st.session_state.user_logado, "KM": "0", "Av_Totais": ", ".join(sobra) if sobra else "Nenhuma", "Local_Reparo": emp, "Valor_Reparo": str(val), "Obs": f"Reparo: {', '.join(reps)}"}])
+            salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.session_state.reset_key += 1; st.rerun()
+
 # --- ABA HISTÓRICO ---
-with tabs[4 if st.session_state.perfil == "admin" else 3]:
+with tabs[3 + idx_off]:
     st.header("📋 Histórico")
     df_h = carregar(ARQ_HIST)
     if not df_h.empty:
-        idx = st.selectbox("ID Detalhes:", df_h.index)
+        idx = st.selectbox("Ver ID:", df_h.index)
         st.dataframe(df_h.drop(columns=["Foto_Base64"]), use_container_width=True)
         fb64 = df_h.iloc[idx]["Foto_Base64"]
         if fb64:
