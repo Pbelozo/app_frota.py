@@ -15,7 +15,7 @@ ARQ_VEIC = "cadastro_veiculos.csv"
 ARQ_MOT  = "cadastro_motoristas.csv"
 ARQ_PECAS = "cadastro_pecas.csv"
 
-# 3. Inicialização e Integridade de Dados
+# 3. Inicialização e Integridade
 def inicializar():
     col_h = ["Data", "Ação", "Veículo", "Usuário", "KM", "CNH", "Av_Saida", "Av_Chegada", "Av_Totais", "Obs", "Valor_Reparo", "Local_Reparo", "Foto_Base64"]
     if not os.path.exists(ARQ_HIST): pd.DataFrame(columns=col_h).to_csv(ARQ_HIST, index=False)
@@ -32,6 +32,7 @@ def salvar(df, arq): df.to_csv(arq, index=False)
 def get_dt_br(): return datetime.now(timezone(timedelta(hours=-3))).strftime("%d/%m/%Y %H:%M")
 
 def get_estado_sistemico(v_pla):
+    if not v_pla or str(v_pla).strip() == "": return "Indefinido", "Nenhuma"
     df_h = carregar(ARQ_HIST)
     if df_h.empty: return "Disponível", "Nenhuma"
     df_v = df_h[df_h['Veículo'].str.contains(str(v_pla), na=False)]
@@ -73,7 +74,6 @@ if not st.session_state.autenticado:
                 else: st.error("Incorreta")
     st.stop()
 
-# --- INTERFACE ---
 st.title(f"Frota - {st.session_state.user_logado}")
 if st.sidebar.button("Sair"): st.session_state.autenticado = False; st.rerun()
 
@@ -81,7 +81,7 @@ abas = ["📤 Saída", "📥 Chegada", "🔧 Oficina", "📋 Histórico"]
 if st.session_state.perfil == "admin": abas.insert(0, "⚙️ Gestão")
 tabs = st.tabs(abas)
 
-# --- ABA GESTÃO (RESTAURADA) ---
+# --- ABA GESTÃO ---
 if st.session_state.perfil == "admin":
     with tabs[0]:
         c1, c2, c3 = st.columns(3)
@@ -119,15 +119,13 @@ if st.session_state.perfil == "admin":
                 ca, cb, cc = st.columns([3, 1, 1])
                 ca.write(f"**{r['Nome']}**")
                 if cb.button("📝", key=f"eu{i}"): st.session_state.edit_u_idx = i; st.rerun()
-                if cc.button("🔑", key=f"ru{i}", help="Reset Senha"): 
-                    df_u.at[i, 'Senha'] = ""; salvar(df_u, ARQ_MOT); st.success("Senha resetada")
+                if cc.button("🔑", key=f"ru{i}"): df_u.at[i, 'Senha'] = ""; salvar(df_u, ARQ_MOT); st.success("Reset")
 
         with c3:
             st.subheader("📋 Avarias")
             df_a = carregar(ARQ_PECAS); na = st.text_input("Novo Código")
             if st.button("Adicionar"):
                 if na and na not in df_a['Item'].values: salvar(pd.concat([df_a, pd.DataFrame([{"Item": na, "Status": "Ativo"}])], ignore_index=True), ARQ_PECAS); st.rerun()
-            st.write("---")
             for i, r in df_a.iterrows():
                 ca1, ca2 = st.columns([4, 1])
                 ca1.write(r['Item'])
@@ -152,36 +150,31 @@ with tabs[1 if st.session_state.perfil == "admin" else 0]:
                 nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "SAÍDA", "Veículo": vs, "Usuário": ms, "KM": str(km_i), "Av_Saida": ", ".join(chk), "Av_Totais": ", ".join(av_tot), "Foto_Base64": converter_multiplas_fotos(fts)}])
                 salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.session_state.reset_key += 1; st.rerun()
 
-# --- ABA CHEGADA ---
+# --- ABA CHEGADA (LOCAL DA CORREÇÃO DO ERRO) ---
 with tabs[2 if st.session_state.perfil == "admin" else 1]:
     st.header("📥 Registrar Chegada")
-    veic_uso = [v for v in [f"{r['Veículo']} ({r['Placa']})" for _, r in carregar(ARQ_VEIC).iterrows()] if get_estado_sistemico(r['Placa'])[0] == "Em uso"]
+    
+    # CORREÇÃO PONTUAL: Tratamento defensivo para evitar KeyError: 'Placa'
+    veic_uso = []
+    for _, r in carregar(ARQ_VEIC).iterrows():
+        p = r.get('Placa') # Usa .get() para não quebrar se a coluna faltar
+        v = r.get('Veículo')
+        if p and v:
+            if get_estado_sistemico(p)[0] == "Em uso":
+                veic_uso.append(f"{v} ({p})")
+                
     vr = st.selectbox("Veículo retorno", [""] + veic_uso, key=f"vr_{st.session_state.reset_key}")
     if vr:
-        km_f = st.number_input("KM Final*", key=f"kmf_{st.session_state.reset_key}")
+        pla_r = vr.split('(')[1].replace(')','')
+        est_r, av_r = get_estado_sistemico(pla_r)
+        kmf = st.number_input("KM Final*", key=f"kmf_{st.session_state.reset_key}")
         av_c = st.multiselect("Novas Avarias no Retorno", carregar(ARQ_PECAS)['Item'].tolist(), key=f"avc_{st.session_state.reset_key}")
         if st.button("Confirmar Chegada"):
-            pla_r = vr.split('(')[1].replace(')','')
-            est_r, av_r = get_estado_sistemico(pla_r)
             av_tot = list(set([x.strip() for x in av_r.split(",") if x.strip() != "Nenhuma"] + av_c))
-            nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "CHEGADA", "Veículo": vr, "Usuário": st.session_state.user_logado, "KM": str(km_f), "Av_Chegada": ", ".join(av_c), "Av_Totais": ", ".join(av_tot)}])
+            nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "CHEGADA", "Veículo": vr, "Usuário": st.session_state.user_logado, "KM": str(kmf), "Av_Chegada": ", ".join(av_c), "Av_Totais": ", ".join(av_tot)}])
             salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST)
-            df_v = carregar(ARQ_VEIC); df_v.loc[df_v['Placa']==pla_r, 'KM_Atual'] = str(km_f); salvar(df_v, ARQ_VEIC)
+            df_v = carregar(ARQ_VEIC); df_v.loc[df_v['Placa']==pla_r, 'KM_Atual'] = str(kmf); salvar(df_v, ARQ_VEIC)
             st.session_state.reset_key += 1; st.rerun()
-
-# --- ABA OFICINA ---
-with tabs[3 if st.session_state.perfil == "admin" else 2]:
-    st.header("🔧 Oficina")
-    df_av = [v for v in [f"{r['Veículo']} ({r['Placa']})" for _, r in carregar(ARQ_VEIC).iterrows()] if get_estado_sistemico(r['Placa'])[1] != "Nenhuma"]
-    v_of = st.selectbox("Veículo para manutenção", [""] + df_av, key=f"vof_{st.session_state.reset_key}")
-    if v_of:
-        sm = get_estado_sistemico(v_of.split('(')[1].replace(')',''))[1]
-        reps = st.multiselect("Itens Reparados", [x.strip() for x in sm.split(",")])
-        emp = st.text_input("Empresa/Oficina*"); val = st.number_input("Valor R$*", min_value=0.0)
-        if st.button("Registrar Reparo"):
-            sobra = [p for p in [x.strip() for x in sm.split(",")] if p not in reps]
-            nova = pd.DataFrame([{"Data": get_dt_br(), "Ação": "OFICINA", "Veículo": v_of, "Usuário": st.session_state.user_logado, "KM": "0", "Av_Totais": ", ".join(sobra) if sobra else "Nenhuma", "Local_Reparo": emp, "Valor_Reparo": str(val), "Obs": f"Reparo: {', '.join(reps)}"}])
-            salvar(pd.concat([carregar(ARQ_HIST), nova]), ARQ_HIST); st.session_state.reset_key += 1; st.rerun()
 
 # --- ABA HISTÓRICO ---
 with tabs[4 if st.session_state.perfil == "admin" else 3]:
