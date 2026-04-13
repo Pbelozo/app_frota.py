@@ -301,8 +301,79 @@ if tab_cad:
                 st.info("Nenhum veículo cadastrado.")
             else:
                 for i, row in df_v2.iterrows():
-                    alerta = " ⚠️ REVISÃO VENCIDA" if revisao_vencida(row) else ""
-                    st.write(f"**{row.get('Modelo','')} — {row.get('Placa','')}** | KM: {row.get('KM_Atual','')} | Status: {row.get('Status','')}{alerta}")
+                    placa    = safe_get(row, "Placa", "")
+                    modelo   = safe_get(row, "Modelo", "")
+                    status   = safe_get(row, "Status", "")
+                    km_atual = safe_get(row, "KM_Atual", "")
+                    alerta   = " ⚠️ REVISÃO VENCIDA" if revisao_vencida(row) else ""
+                    tem_hist = historico_tem_veiculo(placa)
+
+                    with st.expander(f"🚗 {modelo} — {placa} | {status}{alerta}"):
+                        # ── Editar (todos os campos exceto Modelo e Placa)
+                        with st.form(f"edit_vcad_{i}"):
+                            st.write(f"**Modelo:** {modelo} &nbsp;|&nbsp; **Placa:** {placa} *(não editáveis)*")
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                novo_km = st.text_input("KM Atual", value=km_atual, key=f"vcad_km_{i}")
+                                nova_rev = st.text_input("Data Última Revisão (AAAA-MM-DD)",
+                                    value=safe_get(row, "Ultima_Revisao", ""), key=f"vcad_rev_{i}")
+                                novo_crit = st.selectbox("Critério de Revisão",
+                                    ["KM", "Data", "Ambos"],
+                                    index=["KM","Data","Ambos"].index(safe_get(row,"Criterio_Revisao","KM"))
+                                          if safe_get(row,"Criterio_Revisao","KM") in ["KM","Data","Ambos"] else 0,
+                                    key=f"vcad_crit_{i}")
+                            with c2:
+                                novo_int_km = st.text_input("Intervalo Revisão (KM)",
+                                    value=safe_get(row, "Intervalo_KM", "0"), key=f"vcad_ikm_{i}")
+                                novo_int_d = st.text_input("Intervalo Revisão (Dias)",
+                                    value=safe_get(row, "Intervalo_Dias", "0"), key=f"vcad_id_{i}")
+                                novo_status_v = st.selectbox("Status",
+                                    ["Disponível", "Em uso", "Manutenção", "Bloqueado"],
+                                    index=["Disponível","Em uso","Manutenção","Bloqueado"].index(status)
+                                          if status in ["Disponível","Em uso","Manutenção","Bloqueado"] else 0,
+                                    key=f"vcad_st_{i}")
+
+                            av_atuais_str = safe_get(row, "Avarias", "")
+                            av_atuais_lista = [a.strip() for a in av_atuais_str.split(";") if a.strip()]
+                            novas_avarias = st.multiselect("Avarias atuais",
+                                avarias_ativas,
+                                default=[a for a in av_atuais_lista if a in avarias_ativas],
+                                key=f"vcad_av_{i}")
+
+                            col_b1, col_b2, col_b3 = st.columns(3)
+                            with col_b1:
+                                btn_salvar_v = st.form_submit_button("💾 Salvar Edição")
+                            with col_b2:
+                                btn_bloquear_v = st.form_submit_button("🔒 Bloquear")
+                            with col_b3:
+                                btn_excluir_v = st.form_submit_button("🗑️ Excluir", type="primary")
+
+                        if btn_salvar_v:
+                            df_v2.at[i, "KM_Atual"]        = novo_km
+                            df_v2.at[i, "Ultima_Revisao"]  = nova_rev
+                            df_v2.at[i, "Criterio_Revisao"]= novo_crit
+                            df_v2.at[i, "Intervalo_KM"]    = novo_int_km
+                            df_v2.at[i, "Intervalo_Dias"]  = novo_int_d
+                            df_v2.at[i, "Status"]          = novo_status_v
+                            df_v2.at[i, "Avarias"]         = ";".join(novas_avarias)
+                            salvar(df_v2, ARQ_VEIC)
+                            st.success("Veículo atualizado!")
+                            st.rerun()
+
+                        if btn_bloquear_v:
+                            df_v2.at[i, "Status"] = "Bloqueado"
+                            salvar(df_v2, ARQ_VEIC)
+                            st.success("Veículo bloqueado.")
+                            st.rerun()
+
+                        if btn_excluir_v:
+                            if tem_hist:
+                                st.error("❌ Este veículo já possui histórico. Use 'Bloquear' para inativá-lo.")
+                            else:
+                                df_v2 = df_v2[df_v2["Placa"] != placa]
+                                salvar(df_v2, ARQ_VEIC)
+                                st.success("Veículo excluído.")
+                                st.rerun()
 
         # ── 7.2 Motoristas
         with sub_cad[1]:
@@ -312,11 +383,11 @@ if tab_cad:
             with st.form("form_novo_motorista"):
                 c1, c2 = st.columns(2)
                 with c1:
-                    nome_m = st.text_input("Nome *")
+                    nome_m  = st.text_input("Nome *")
                     login_m = st.text_input("Login / Email * (único)").strip().lower()
                     senha_m = st.text_input("Senha *", type="password")
                 with c2:
-                    cnh_val = st.date_input("Validade da CNH *", value=date.today())
+                    cnh_val  = st.date_input("Validade da CNH *", value=date.today())
                     perfil_m = st.selectbox("Perfil *", ["Usuário", "Admin"])
 
                 if st.form_submit_button("💾 Salvar Motorista"):
@@ -344,8 +415,69 @@ if tab_cad:
             if df_u2.empty:
                 st.info("Nenhum motorista cadastrado.")
             else:
-                cols_show = [c for c in ["Nome", "Login", "Validade_CNH", "Perfil", "Status"] if c in df_u2.columns]
-                st.dataframe(df_u2[cols_show], use_container_width=True)
+                for i, row in df_u2.iterrows():
+                    nome_u   = safe_get(row, "Nome", "")
+                    login_u  = safe_get(row, "Login", "")
+                    status_u = safe_get(row, "Status", "")
+                    perfil_u = safe_get(row, "Perfil", "")
+                    cnh_u    = safe_get(row, "Validade_CNH", "")
+                    cnh_ok   = cnh_valida(row)
+                    alerta_cnh = " ⚠️ CNH VENCIDA" if not cnh_ok else ""
+                    tem_hist_u = historico_tem_motorista(login_u)
+
+                    with st.expander(f"👤 {nome_u} ({login_u}) | {perfil_u} | {status_u}{alerta_cnh}"):
+                        # ── Editar (todos exceto Nome)
+                        with st.form(f"edit_ucad_{i}"):
+                            st.write(f"**Nome:** {nome_u} *(não editável)*")
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                novo_login  = st.text_input("Login / Email", value=login_u, key=f"ucad_lg_{i}")
+                                nova_senha  = st.text_input("Nova Senha (deixe em branco para manter)",
+                                    type="password", key=f"ucad_pw_{i}")
+                            with c2:
+                                nova_cnh_u  = st.text_input("Validade CNH (AAAA-MM-DD)", value=cnh_u, key=f"ucad_cnh_{i}")
+                                novo_perfil = st.selectbox("Perfil",
+                                    ["Usuário", "Admin"],
+                                    index=0 if perfil_u != "Admin" else 1,
+                                    key=f"ucad_prf_{i}")
+                                novo_st_u   = st.selectbox("Status",
+                                    ["Ativo", "Bloqueado"],
+                                    index=0 if status_u == "Ativo" else 1,
+                                    key=f"ucad_stu_{i}")
+
+                            col_b1, col_b2, col_b3 = st.columns(3)
+                            with col_b1:
+                                btn_salvar_u   = st.form_submit_button("💾 Salvar Edição")
+                            with col_b2:
+                                btn_bloquear_u = st.form_submit_button("🔒 Bloquear")
+                            with col_b3:
+                                btn_excluir_u  = st.form_submit_button("🗑️ Excluir", type="primary")
+
+                        if btn_salvar_u:
+                            df_u2.at[i, "Login"]        = novo_login.strip().lower()
+                            df_u2.at[i, "Validade_CNH"] = nova_cnh_u.strip()
+                            df_u2.at[i, "Perfil"]       = novo_perfil
+                            df_u2.at[i, "Status"]       = novo_st_u
+                            if nova_senha.strip():
+                                df_u2.at[i, "Senha"] = nova_senha.strip()
+                            salvar(df_u2, ARQ_MOT)
+                            st.success("Motorista atualizado!")
+                            st.rerun()
+
+                        if btn_bloquear_u:
+                            df_u2.at[i, "Status"] = "Bloqueado"
+                            salvar(df_u2, ARQ_MOT)
+                            st.success("Motorista bloqueado.")
+                            st.rerun()
+
+                        if btn_excluir_u:
+                            if tem_hist_u:
+                                st.error("❌ Este motorista já possui histórico. Use 'Bloquear' para inativá-lo.")
+                            else:
+                                df_u2 = df_u2[df_u2["Login"] != login_u]
+                                salvar(df_u2, ARQ_MOT)
+                                st.success("Motorista excluído.")
+                                st.rerun()
 
         # ── 7.3 Avarias
         with sub_cad[2]:
@@ -371,7 +503,29 @@ if tab_cad:
             if df_av2.empty:
                 st.info("Nenhuma avaria cadastrada.")
             else:
-                st.dataframe(df_av2, use_container_width=True)
+                for i, row in df_av2.iterrows():
+                    desc_i  = safe_get(row, "Descricao", "")
+                    status_i = safe_get(row, "Status", "")
+                    em_uso  = avaria_em_uso(desc_i)
+
+                    with st.expander(f"⚠️ {desc_i} | {status_i}"):
+                        st.write("*Avarias não são editáveis.*")
+                        col_b1, col_b2 = st.columns(2)
+                        with col_b1:
+                            if st.button("🔒 Bloquear", key=f"blk_avcad_{i}"):
+                                df_av2.at[i, "Status"] = "Bloqueado"
+                                salvar(df_av2, ARQ_AVAR)
+                                st.success("Avaria bloqueada.")
+                                st.rerun()
+                        with col_b2:
+                            if em_uso:
+                                st.warning("❌ Em uso — não pode excluir. Use Bloquear.")
+                            else:
+                                if st.button("🗑️ Excluir", key=f"del_avcad_{i}", type="primary"):
+                                    df_av2 = df_av2[df_av2["Descricao"] != desc_i]
+                                    salvar(df_av2, ARQ_AVAR)
+                                    st.success("Avaria excluída.")
+                                    st.rerun()
 
 # ─────────────────────────────────────────────
 # 8. ABA RETIRADA DE VEÍCULO
