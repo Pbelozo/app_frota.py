@@ -52,12 +52,21 @@ def inicializar_sistema():
             }]).to_csv(ARQ_MOT, index=False)
 
     # Veículos
+    colunas_veic = ["Modelo", "Placa", "KM_Atual", "KM_Ultima_Revisao",
+                    "Ultima_Revisao", "Criterio_Revisao", "Intervalo_KM",
+                    "Intervalo_Dias", "Avarias", "Status"]
     if not os.path.exists(ARQ_VEIC):
-        pd.DataFrame(columns=[
-            "Modelo", "Placa", "KM_Atual", "Ultima_Revisao",
-            "Criterio_Revisao", "Intervalo_KM", "Intervalo_Dias",
-            "Avarias", "Status"
-        ]).to_csv(ARQ_VEIC, index=False)
+        pd.DataFrame(columns=colunas_veic).to_csv(ARQ_VEIC, index=False)
+    else:
+        # Garante que colunas novas existam em arquivos antigos
+        try:
+            df_veic_tmp = pd.read_csv(ARQ_VEIC, dtype=str).fillna("")
+            for col in colunas_veic:
+                if col not in df_veic_tmp.columns:
+                    df_veic_tmp[col] = ""
+            df_veic_tmp.to_csv(ARQ_VEIC, index=False)
+        except Exception:
+            pd.DataFrame(columns=colunas_veic).to_csv(ARQ_VEIC, index=False)
 
     # Avarias
     if not os.path.exists(ARQ_AVAR):
@@ -73,6 +82,24 @@ def carregar(arq):
         return pd.read_csv(arq, dtype=str).fillna("")
     except Exception:
         return pd.DataFrame()
+
+def safe_get(row, key, default=""):
+    """Acessa uma chave de uma row com segurança."""
+    try:
+        return row[key] if key in row.index else default
+    except Exception:
+        return default
+
+def montar_lista_veiculos(df_v):
+    """Monta lista de veículos de forma segura."""
+    lista = []
+    if df_v.empty:
+        return lista
+    for _, r in df_v.iterrows():
+        modelo = safe_get(r, "Modelo", "?")
+        placa  = safe_get(r, "Placa", "?")
+        lista.append(f"{modelo} ({placa})")
+    return lista
 
 def salvar(df, arq):
     df.to_csv(arq, index=False)
@@ -95,33 +122,35 @@ def cnh_valida(motorista_row):
     return d >= date.today()
 
 def revisao_vencida(veiculo_row):
-    criterio = str(veiculo_row.get("Criterio_Revisao", "")).strip()
-    vencida = False
+    try:
+        criterio = safe_get(veiculo_row, "Criterio_Revisao", "").strip()
+        vencida = False
 
-    if criterio in ("KM", "Ambos"):
-        try:
-            km_atual = int(str(veiculo_row.get("KM_Atual", "0")).strip() or "0")
-            intervalo_km = int(str(veiculo_row.get("Intervalo_KM", "0")).strip() or "0")
-            ultima_rev_km_str = str(veiculo_row.get("KM_Ultima_Revisao", "0")).strip()
-            km_ultima = int(ultima_rev_km_str or "0")
-            if intervalo_km > 0 and (km_atual - km_ultima) >= intervalo_km:
-                vencida = True
-        except Exception:
-            pass
+        if criterio in ("KM", "Ambos"):
+            try:
+                km_atual   = int(safe_get(veiculo_row, "KM_Atual", "0") or "0")
+                intervalo_km = int(safe_get(veiculo_row, "Intervalo_KM", "0") or "0")
+                km_ultima  = int(safe_get(veiculo_row, "KM_Ultima_Revisao", "0") or "0")
+                if intervalo_km > 0 and (km_atual - km_ultima) >= intervalo_km:
+                    vencida = True
+            except Exception:
+                pass
 
-    if criterio in ("Data", "Ambos"):
-        ultima_rev = str(veiculo_row.get("Ultima_Revisao", "")).strip()
-        intervalo_dias_str = str(veiculo_row.get("Intervalo_Dias", "0")).strip()
-        d_rev = str_para_date(ultima_rev)
-        try:
-            intervalo_dias = int(intervalo_dias_str or "0")
-        except Exception:
-            intervalo_dias = 0
-        if d_rev and intervalo_dias > 0:
-            if date.today() >= d_rev + timedelta(days=intervalo_dias):
-                vencida = True
+        if criterio in ("Data", "Ambos"):
+            ultima_rev     = safe_get(veiculo_row, "Ultima_Revisao", "").strip()
+            intervalo_dias_str = safe_get(veiculo_row, "Intervalo_Dias", "0").strip()
+            d_rev = str_para_date(ultima_rev)
+            try:
+                intervalo_dias = int(intervalo_dias_str or "0")
+            except Exception:
+                intervalo_dias = 0
+            if d_rev and intervalo_dias > 0:
+                if date.today() >= d_rev + timedelta(days=intervalo_dias):
+                    vencida = True
 
-    return vencida
+        return vencida
+    except Exception:
+        return False
 
 def historico_tem_veiculo(placa):
     df = carregar(ARQ_HIST)
@@ -365,8 +394,8 @@ with tab_ret:
     df_av = carregar(ARQ_AVAR)
 
     # Apenas veículos Disponíveis
-    veics_disp = df_v[df_v.get("Status", pd.Series()).eq("Disponível")] if not df_v.empty and "Status" in df_v.columns else pd.DataFrame()
-    lista_veics = [f"{r['Modelo']} ({r['Placa']})" for _, r in veics_disp.iterrows()] if not veics_disp.empty else []
+    veics_disp = df_v[df_v["Status"].eq("Disponível")] if not df_v.empty and "Status" in df_v.columns else pd.DataFrame()
+    lista_veics = montar_lista_veiculos(veics_disp)
 
     if not lista_veics:
         st.info("Nenhum veículo disponível para retirada.")
@@ -515,7 +544,7 @@ with tab_ofc:
 
     if tipo_ofc == "Manutenção":
         st.write("#### Registrar Manutenção")
-        veics_todos = [f"{r['Modelo']} ({r['Placa']})" for _, r in df_v.iterrows()] if not df_v.empty else []
+        veics_todos = montar_lista_veiculos(df_v)
 
         with st.form("form_manutencao"):
             veic_man = st.selectbox("Veículo *", [""] + veics_todos)
