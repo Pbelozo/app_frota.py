@@ -1,5 +1,3 @@
-# v2
-import streamlit as st
 import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta, timezone
@@ -15,7 +13,7 @@ st.set_page_config(page_title="Gestão de Frota", page_icon="🚗", layout="wide
 # ─────────────────────────────────────────────
 # 2. CONEXÃO GOOGLE SHEETS
 # ─────────────────────────────────────────────
-SHEET_ID = st.secrets["SHEET_ID"]
+SHEET_ID = st.secrets["gcp_service_account"]["sheet_id"]
 SCOPES   = ["https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive"]
 
