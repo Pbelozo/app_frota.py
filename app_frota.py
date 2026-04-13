@@ -19,9 +19,15 @@ SCOPES   = ["https://www.googleapis.com/auth/spreadsheets",
 
 @st.cache_resource
 def get_service():
-    creds = service_account.Credentials.from_service_account_info(
-        st.secrets["gcp_service_account"], scopes=SCOPES)
-    return build("sheets", "v4", credentials=creds).spreadsheets()
+    try:
+        info = dict(st.secrets["gcp_service_account"])
+        if "private_key" in info:
+            info["private_key"] = info["private_key"].replace("\\n", "\n")
+        creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+        return build("sheets", "v4", credentials=creds).spreadsheets()
+    except Exception as e:
+        st.error(f"Erro conexao Google: {e}")
+        st.stop()
 
 ABA_HIST = "Historico"
 ABA_VEIC = "Veiculos"
