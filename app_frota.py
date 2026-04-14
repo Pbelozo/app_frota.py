@@ -143,7 +143,7 @@ def append_linha(aba, linha_dict, colunas):
         except Exception as e:
             erro_str = str(e)
             # Se payload muito grande, salva sem fotos
-            if "413" in erro_str or "Request Entity Too Large" in erro_str or len(str(linha_dict.get("Foto_Base64",""))) > 40000:
+            if "413" in erro_str or "Request Entity Too Large" in erro_str or len(str(linha_dict.get("Foto_Base64",""))) > 550000:
                 linha_dict_sem_foto = dict(linha_dict)
                 linha_dict_sem_foto["Foto_Base64"] = "[foto omitida: arquivo muito grande]"
                 try:
@@ -345,27 +345,29 @@ def avaria_em_uso(descricao):
             return True
     return False
 
-def imagem_para_base64(img_bytes, max_kb=200):
+def imagem_para_base64(img_bytes, max_kb=400):
     """Converte imagem para base64, comprimindo se necessário para max_kb KB."""
     try:
         from PIL import Image
         img = Image.open(io.BytesIO(img_bytes))
-        # Converte para RGB se necessário
-        if img.mode not in ("RGB","L"):
+        if img.mode not in ("RGB", "L"):
             img = img.convert("RGB")
-        # Redimensiona se muito grande (máx 1200px no lado maior)
-        max_dim = 1200
+        # Redimensiona se maior que 1600px
+        max_dim = 1600
         if max(img.width, img.height) > max_dim:
             ratio = max_dim / max(img.width, img.height)
-            img = img.resize((int(img.width*ratio), int(img.height*ratio)), Image.LANCZOS)
-        # Comprime com qualidade progressiva até caber em max_kb
-        quality = 85
-        while quality >= 40:
+            img = img.resize((int(img.width * ratio), int(img.height * ratio)), Image.LANCZOS)
+        # Comprime progressivamente até caber em max_kb
+        for quality in [85, 70, 55, 40, 25]:
             buf = io.BytesIO()
             img.save(buf, format="JPEG", quality=quality, optimize=True)
             if buf.tell() <= max_kb * 1024:
-                break
-            quality -= 15
+                buf.seek(0)
+                return base64.b64encode(buf.read()).decode()
+        # Última tentativa: reduz dimensão pela metade
+        img = img.resize((img.width // 2, img.height // 2), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=25, optimize=True)
         buf.seek(0)
         return base64.b64encode(buf.read()).decode()
     except Exception:
@@ -1342,3 +1344,4 @@ if tab_gest:
                                 st.rerun()
                         else:
                             st.caption("Em uso")
+
