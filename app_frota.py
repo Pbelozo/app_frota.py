@@ -844,11 +844,46 @@ with tab_dev:
     df_av   = ler_aba(ABA_AVAR, COLS_AVAR)
     em_uso  = df_v[df_v["Status"]=="Em uso"] if not df_v.empty and "Status" in df_v.columns else pd.DataFrame()
     veics_meus = []
+    veics_sem_historico = []  # veículos "Em uso" sem retirada registrada (bug anterior)
+
     for _, row in em_uso.iterrows():
         placa = safe_get(row,"Placa","")
-        hp = df_hist[(df_hist.get("Placa",pd.Series())==placa) & (df_hist.get("Acao",pd.Series())=="Retirada")] if not df_hist.empty and "Placa" in df_hist.columns else pd.DataFrame()
-        if not hp.empty and str(hp.iloc[-1].get("Usuario","")).strip()==st.session_state.login_logado:
-            veics_meus.append(f"{safe_get(row,'Modelo','')} ({placa})")
+        modelo = safe_get(row,"Modelo","")
+        label = f"{modelo} ({placa})"
+
+        if not df_hist.empty and "Placa" in df_hist.columns:
+            hp = df_hist[(df_hist["Placa"]==placa) & (df_hist["Acao"]=="Retirada")]
+            if not hp.empty:
+                ultimo_usuario = str(hp.iloc[-1].get("Usuario","")).strip()
+                if ultimo_usuario == st.session_state.login_logado:
+                    veics_meus.append(label)
+                # Se admin, pode ver veículos sem retirada ou de outros usuários
+                elif st.session_state.perfil == "admin":
+                    veics_sem_historico.append((label, ultimo_usuario))
+            else:
+                # Veículo "Em uso" sem nenhuma retirada registrada
+                if st.session_state.perfil == "admin":
+                    veics_sem_historico.append((label, "sem registro"))
+        else:
+            if st.session_state.perfil == "admin":
+                veics_sem_historico.append((label, "sem registro"))
+
+    # Aviso para admin sobre veículos com inconsistência
+    if veics_sem_historico and st.session_state.perfil == "admin":
+        with st.expander("⚠️ Veículos 'Em uso' sem retirada registrada (admin)"):
+            st.warning("Estes veículos estão marcados como 'Em uso' mas não há retirada no histórico. Provavelmente causado por um erro anterior. Você pode devolvê-los manualmente.")
+            for lbl, usr in veics_sem_historico:
+                c1, c2 = st.columns([3,1])
+                with c1:
+                    st.write(f"🚗 **{lbl}** — último usuário registrado: *{usr}*")
+                with c2:
+                    placa_fix = lbl.split("(")[-1].replace(")","").strip()
+                    if st.button(f"🔧 Corrigir para Disponível", key=f"fix_{placa_fix}"):
+                        df_v.loc[df_v["Placa"]==placa_fix,"Status"]="Disponível"
+                        salvar_aba(df_v, ABA_VEIC, COLS_VEIC)
+                        st.success(f"✅ {lbl} marcado como Disponível.")
+                        invalidar_cache()
+                        st.rerun()
 
     if not veics_meus:
         st.info("Você não possui veículos para devolver.")
