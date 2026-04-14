@@ -375,12 +375,15 @@ if tab_cad:
             with st.form("form_novo_veiculo"):
                 c1, c2 = st.columns(2)
                 with c1:
-                    mod = st.text_input("Modelo *")
-                    pla = st.text_input("Placa * (única)").upper().strip()
-                    km  = st.number_input("KM Atual *", min_value=0, step=1)
+                    mod    = st.text_input("Modelo *")
+                    pla    = st.text_input("Placa * (única)").upper().strip()
+                    km     = st.number_input("KM Atual *", min_value=0, step=1)
+                    km_rev = st.number_input("KM na Última Revisão *", min_value=0, step=1,
+                                             help="Informe o KM que estava no veículo quando foi feita a última revisão")
                 with c2:
                     ult_rev  = st.date_input("Data da Última Revisão *", value=date.today())
-                    criterio = st.selectbox("Critério de Revisão *", ["KM","Data","Ambos"])
+                    criterio = st.selectbox("Critério de Revisão *", ["KM","Data","Ambos"],
+                                            help="Ambos = alerta no que vencer primeiro (KM ou Data)")
                     int_km   = st.number_input("Intervalo Revisão (KM)",   min_value=0, step=500)
                     int_dias = st.number_input("Intervalo Revisão (Dias)", min_value=0, step=30)
                 avarias_sel = st.multiselect("Estado atual (Avarias)", av_ativas)
@@ -391,19 +394,21 @@ if tab_cad:
                     if not pla: erros.append("Placa obrigatória.")
                     if pla and not df_v.empty and "Placa" in df_v.columns and pla in df_v["Placa"].values:
                         erros.append(f"Placa '{pla}' já cadastrada.")
+                    if km_rev > km:
+                        erros.append("KM da última revisão não pode ser maior que o KM atual.")
                     if erros:
                         for e in erros: st.error(e)
                     else:
                         append_linha(ABA_VEIC, {
                             "Modelo":mod,"Placa":pla,"KM_Atual":str(km),
-                            "KM_Ultima_Revisao":str(km),
+                            "KM_Ultima_Revisao":str(km_rev),
                             "Ultima_Revisao":ult_rev.strftime("%Y-%m-%d"),
                             "Criterio_Revisao":criterio,
                             "Intervalo_KM":str(int_km),"Intervalo_Dias":str(int_dias),
                             "Avarias":";".join(avarias_sel),"Status":status_v
                         }, COLS_VEIC)
                         st.success(f"Veículo {mod} ({pla}) cadastrado!")
-                        invalidar_cache()  # ✅ CORREÇÃO
+                        invalidar_cache()
                         st.rerun()
 
             st.write("---")
@@ -421,9 +426,13 @@ if tab_cad:
                             st.write(f"**Modelo:** {modelo} | **Placa:** {placa} *(não editáveis)*")
                             c1, c2 = st.columns(2)
                             with c1:
-                                novo_km   = st.text_input("KM Atual", value=km_at, key=f"vcad_km_{i}")
-                                nova_rev  = st.text_input("Data Última Revisão (AAAA-MM-DD)", value=safe_get(row,"Ultima_Revisao",""), key=f"vcad_rev_{i}")
-                                novo_crit = st.selectbox("Critério", ["KM","Data","Ambos"],
+                                novo_km      = st.text_input("KM Atual", value=km_at, key=f"vcad_km_{i}")
+                                novo_km_rev  = st.text_input("KM na Última Revisão",
+                                                             value=safe_get(row,"KM_Ultima_Revisao","0"),
+                                                             key=f"vcad_kmrev_{i}",
+                                                             help="KM que estava no veículo quando foi feita a última revisão")
+                                nova_rev     = st.text_input("Data Última Revisão (AAAA-MM-DD)", value=safe_get(row,"Ultima_Revisao",""), key=f"vcad_rev_{i}")
+                                novo_crit    = st.selectbox("Critério", ["KM","Data","Ambos"],
                                     index=["KM","Data","Ambos"].index(safe_get(row,"Criterio_Revisao","KM")) if safe_get(row,"Criterio_Revisao","KM") in ["KM","Data","Ambos"] else 0,
                                     key=f"vcad_crit_{i}")
                             with c2:
@@ -439,7 +448,8 @@ if tab_cad:
                             with col_b2: btn_bl = st.form_submit_button("🔒 Bloquear")
                             with col_b3: btn_ex = st.form_submit_button("🗑️ Excluir", type="primary")
                         if btn_sv:
-                            df_v2.at[i,"KM_Atual"]=novo_km; df_v2.at[i,"Ultima_Revisao"]=nova_rev
+                            df_v2.at[i,"KM_Atual"]=novo_km; df_v2.at[i,"KM_Ultima_Revisao"]=novo_km_rev
+                            df_v2.at[i,"Ultima_Revisao"]=nova_rev
                             df_v2.at[i,"Criterio_Revisao"]=novo_crit; df_v2.at[i,"Intervalo_KM"]=novo_int_km
                             df_v2.at[i,"Intervalo_Dias"]=novo_int_d; df_v2.at[i,"Status"]=novo_st_v
                             df_v2.at[i,"Avarias"]=";".join(novas_av)
@@ -626,7 +636,10 @@ with tab_ret:
                     st.markdown("**📋 Informações do Veículo**")
                     c1, c2, c3 = st.columns(3)
                     with c1:
-                        st.metric("KM Atual", safe_get(r,"KM_Atual","—"))
+                        km_atual_v   = safe_get(r,"KM_Atual","—")
+                        km_rev_v     = safe_get(r,"KM_Ultima_Revisao","—")
+                        st.metric("KM Atual", km_atual_v)
+                        st.caption(f"KM na última revisão: {km_rev_v}")
                     with c2:
                         st.metric("Última Revisão", safe_get(r,"Ultima_Revisao","—"))
                     with c3:
