@@ -1189,30 +1189,34 @@ with tab_hist:
                 # Exibe fotos
                 if row_orig is not None:
                     fotos_raw = str(row_orig.get("Foto_Base64","")).strip()
-                    # Remove textos de placeholder
-                    if fotos_raw and fotos_raw not in ("nan","None","","[foto omitida: arquivo muito grande]"):
-                        fotos_lista = [f.strip() for f in fotos_raw.split("||") if f.strip() and len(f.strip()) > 100]
-                        if fotos_lista:
-                            st.markdown("---")
-                            st.markdown(f"**📷 Fotos ({len(fotos_lista)}):**")
-                            cols_f = st.columns(min(len(fotos_lista), 3))
-                            for fi, fb64 in enumerate(fotos_lista):
-                                with cols_f[fi % 3]:
-                                    try:
-                                        # Limpa possíveis caracteres inválidos no base64
-                                        fb64_clean = fb64.replace(" ","").replace("\n","")
-                                        # Adiciona padding se necessário
-                                        padding = 4 - len(fb64_clean) % 4
-                                        if padding != 4:
-                                            fb64_clean += "=" * padding
-                                        img_bytes = base64.b64decode(fb64_clean)
-                                        st.image(img_bytes, width=280, caption=f"Foto {fi+1}")
-                                    except Exception as ex:
-                                        st.caption(f"Erro ao exibir foto {fi+1}: {ex}")
+
+                    # DEBUG temporário — mostra o que está no campo
+                    if fotos_raw and fotos_raw not in ("nan","None",""):
+                        tam = len(fotos_raw)
+                        st.markdown("---")
+                        if fotos_raw == "[foto omitida: arquivo muito grande]":
+                            st.warning("📷 Foto omitida — arquivo era muito grande.")
                         else:
-                            st.caption("📷 Nenhuma foto válida neste registro.")
-                    elif fotos_raw == "[foto omitida: arquivo muito grande]":
-                        st.warning("📷 Foto omitida no registro — arquivo era muito grande.")
+                            fotos_lista = [f.strip() for f in fotos_raw.split("||") if f.strip() and len(f.strip()) > 50]
+                            if fotos_lista:
+                                st.markdown(f"**📷 {len(fotos_lista)} foto(s) — {tam} chars base64:**")
+                                cols_f = st.columns(min(len(fotos_lista), 3))
+                                for fi, fb64 in enumerate(fotos_lista):
+                                    with cols_f[fi % 3]:
+                                        try:
+                                            fb64_clean = "".join(fb64.split())  # remove todos os whitespace
+                                            # corrige padding
+                                            fb64_clean += "=" * ((4 - len(fb64_clean) % 4) % 4)
+                                            img_bytes = base64.b64decode(fb64_clean, validate=False)
+                                            st.image(img_bytes, width=280, caption=f"Foto {fi+1}")
+                                        except Exception as ex:
+                                            st.error(f"Foto {fi+1} — erro: {ex}")
+                                            st.code(fb64[:80] + "...", language=None)
+                            else:
+                                st.info(f"📷 Campo tem {tam} chars mas nenhuma foto válida encontrada.")
+                                st.code(fotos_raw[:120] + ("..." if tam > 120 else ""), language=None)
+                    else:
+                        st.caption("📷 Sem foto neste registro.")
 
         st.caption(f"Total de registros: {len(df_final)}")
 
