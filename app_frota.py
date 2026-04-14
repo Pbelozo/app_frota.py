@@ -121,7 +121,13 @@ def append_linha(aba, linha_dict, colunas):
 # 4. INICIALIZAÇÃO (✅ CORREÇÃO: cache_resource para rodar só uma vez)
 # ─────────────────────────────────────────────
 @st.cache_resource
-def inicializar_sistema():
+def inicializar_sistema()
+
+# Contadores para forçar recriação dos file_uploaders após cada submissão
+if "upload_key_ret" not in st.session_state:
+    st.session_state["upload_key_ret"] = 0
+if "upload_key_dev" not in st.session_state:
+    st.session_state["upload_key_dev"] = 0:
     linha_paulo = ["Paulo","paulo","123","2030-12-31","Admin","Ativo"]
     try:
         svc  = get_service()
@@ -586,7 +592,7 @@ with tab_ret:
             "Selecione uma ou mais fotos",
             type=["jpg","jpeg","png"],
             accept_multiple_files=True,
-            key="fu_ret"
+            key=f"fu_ret_{st.session_state['upload_key_ret']}"
         )
         # Converte cada arquivo para base64 imediatamente ao carregar
         if fotos_ret:
@@ -632,7 +638,8 @@ with tab_ret:
                     df_v.loc[df_v["Placa"]==placa_sel,"Avarias"]=";".join(av_lista)
                     salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
                     # Limpa estados antes do rerun
-                    for k in ["fotos_ret_b64","obs_ret","avs_ret","fu_ret","sel_veic_ret"]:
+                    st.session_state["upload_key_ret"] += 1
+                    for k in ["fotos_ret_b64","obs_ret","avs_ret","sel_veic_ret"]:
                         st.session_state.pop(k, None)
                     st.success(f"✅ Retirada registrada! KM saída: {km_ini}")
                     invalidar_cache()
@@ -669,7 +676,7 @@ with tab_dev:
             "Selecione uma ou mais fotos",
             type=["jpg","jpeg","png"],
             accept_multiple_files=True,
-            key="fu_dev"
+            key=f"fu_dev_{st.session_state['upload_key_dev']}"
         )
         if fotos_dev:
             fotos_b64_list = []
@@ -714,7 +721,8 @@ with tab_dev:
                         if av not in av_lista: av_lista.append(av)
                     df_v.loc[df_v["Placa"]==placa_dev,"Avarias"]=";".join(av_lista)
                     salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
-                    for k in ["fotos_dev_b64","obs_dev","avs_dev","km_dev","fu_dev","sel_veic_dev"]:
+                    st.session_state["upload_key_dev"] += 1
+                    for k in ["fotos_dev_b64","obs_dev","avs_dev","km_dev","sel_veic_dev"]:
                         st.session_state.pop(k, None)
                     st.success(f"✅ Devolução registrada! KM final: {km_dev}")
                     invalidar_cache()
