@@ -303,6 +303,71 @@ def imagem_para_base64(img_bytes):
     except Exception:
         return ""
 
+def widget_fotos(prefixo: str, label: str):
+    """
+    Widget de fotos com câmera e upload múltiplo.
+    Armazena lista de base64 em st.session_state[f"{prefixo}_fotos_b64"].
+    Retorna a lista atual de base64.
+    """
+    key_list  = f"{prefixo}_fotos_b64"
+    key_modo  = f"{prefixo}_foto_modo"
+    key_cam   = f"{prefixo}_cam_idx"
+
+    if key_list  not in st.session_state: st.session_state[key_list]  = []
+    if key_modo  not in st.session_state: st.session_state[key_modo]  = "upload"
+    if key_cam   not in st.session_state: st.session_state[key_cam]   = 0
+
+    st.markdown(f"**📷 {label}**")
+
+    # Abas: câmera ou upload
+    aba_cam, aba_up = st.tabs(["📸 Câmera", "🖼️ Upload de arquivos"])
+
+    with aba_cam:
+        cam = st.camera_input("Tirar foto", key=f"cam_{prefixo}_{st.session_state[key_cam]}")
+        if cam is not None:
+            b64 = imagem_para_base64(cam.read())
+            st.session_state[key_list].append(b64)
+            # Incrementa key para limpar câmera e permitir nova foto
+            st.session_state[key_cam] += 1
+            st.rerun()
+
+    with aba_up:
+        uploads = st.file_uploader(
+            "Selecione uma ou mais imagens",
+            type=["jpg","jpeg","png"],
+            accept_multiple_files=True,
+            key=f"up_{prefixo}_{st.session_state.get(f'{prefixo}_up_key',0)}"
+        )
+        if uploads:
+            novos = [imagem_para_base64(f.read()) for f in uploads]
+            st.session_state[key_list].extend(novos)
+            # Reseta uploader e limpa lista de uploads
+            st.session_state[f"{prefixo}_up_key"] = st.session_state.get(f"{prefixo}_up_key",0) + 1
+            st.rerun()
+
+    # Mostra miniaturas com botão de remover
+    fotos = st.session_state[key_list]
+    if fotos:
+        st.markdown(f"**{len(fotos)} foto(s) adicionada(s):**")
+        cols = st.columns(min(len(fotos), 4))
+        to_remove = None
+        for idx, b64 in enumerate(fotos):
+            with cols[idx % 4]:
+                try:
+                    img_bytes = base64.b64decode(b64)
+                    st.image(img_bytes, use_container_width=True)
+                except Exception:
+                    st.warning("Imagem inválida")
+                if st.button("🗑️ Remover", key=f"rm_{prefixo}_{idx}"):
+                    to_remove = idx
+        if to_remove is not None:
+            st.session_state[key_list].pop(to_remove)
+            st.rerun()
+    else:
+        st.caption("Nenhuma foto adicionada ainda.")
+
+    return st.session_state[key_list]
+
 # ─────────────────────────────────────────────
 # 6. LOGIN
 # ─────────────────────────────────────────────
@@ -656,13 +721,8 @@ with tab_ret:
         obs_ret = st.text_area("Observações", key="obs_ret")
         avs_ret = st.multiselect("Avarias observadas na saída", av_ativas, default=[], key="avs_ret")
 
-        # ── Foto via câmera (sem bug de deserialização) ─────────────────────
-        st.markdown("**📷 Foto da retirada (opcional)**")
-        cam_ret = st.camera_input("Tirar foto", key="cam_ret")
-        if cam_ret is not None:
-            st.session_state["fotos_ret_b64"] = imagem_para_base64(cam_ret.read())
-        elif "fotos_ret_b64" not in st.session_state:
-            st.session_state["fotos_ret_b64"] = ""
+        # ── Fotos: câmera + upload múltiplo ─────────────────────────────────
+        widget_fotos("ret", "Fotos da retirada (opcional)")
 
         if st.button("✅ Confirmar Retirada", type="primary", key="btn_confirmar_ret"):
             if not veic_sel_ret:
@@ -675,7 +735,7 @@ with tab_ret:
                 else:
                     row_v    = row_v.iloc[0]
                     km_ini   = safe_get(row_v,"KM_Atual","0")
-                    foto_b64 = st.session_state.get("fotos_ret_b64","")
+                    foto_b64 = "||".join(st.session_state.get("ret_fotos_b64",[]))
                     append_linha(ABA_HIST,{
                         "Data":get_dt_br(),"Acao":"Retirada",
                         "Veiculo":safe_get(row_v,"Modelo",""),"Placa":placa_sel,
@@ -695,7 +755,8 @@ with tab_ret:
                     salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
                     # Limpa estados antes do rerun
                     st.session_state["upload_key_ret"] += 1
-                    for k in ["fotos_ret_b64","obs_ret","avs_ret","sel_veic_ret"]:
+                    st.session_state.pop("ret_fotos_b64", None)
+                    for k in ["obs_ret","avs_ret","sel_veic_ret"]:
                         st.session_state.pop(k, None)
                     st.success(f"✅ Retirada registrada! KM saída: {km_ini}")
                     invalidar_cache()
@@ -726,13 +787,8 @@ with tab_dev:
         obs_dev  = st.text_area("Observações", key="obs_dev")
         avs_dev  = st.multiselect("Avarias na chegada", av_ativas, key="avs_dev")
 
-        # ── Foto via câmera (sem bug de deserialização) ─────────────────────
-        st.markdown("**📷 Foto da devolução (opcional)**")
-        cam_dev = st.camera_input("Tirar foto", key="cam_dev")
-        if cam_dev is not None:
-            st.session_state["fotos_dev_b64"] = imagem_para_base64(cam_dev.read())
-        elif "fotos_dev_b64" not in st.session_state:
-            st.session_state["fotos_dev_b64"] = ""
+        # ── Fotos: câmera + upload múltiplo ─────────────────────────────────
+        widget_fotos("dev", "Fotos da devolução (opcional)")
 
         if st.button("✅ Confirmar Devolução", type="primary", key="btn_confirmar_dev"):
             if not veic_dev:
@@ -757,7 +813,7 @@ with tab_dev:
                     if km_dev == 0 and km_ini_int > 0:
                         st.error(f"❌ Informe o KM final do veículo. KM de retirada foi {km_ini_int:,}.")
                         st.stop()
-                    foto_b64   = st.session_state.get("fotos_dev_b64","")
+                    foto_b64   = "||".join(st.session_state.get("dev_fotos_b64",[]))
                     append_linha(ABA_HIST,{
                         "Data":get_dt_br(),"Acao":"Devolucao",
                         "Veiculo":safe_get(row_v,"Modelo",""),"Placa":placa_dev,
@@ -776,7 +832,8 @@ with tab_dev:
                     df_v.loc[df_v["Placa"]==placa_dev,"Avarias"]=";".join(av_lista)
                     salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
                     st.session_state["upload_key_dev"] += 1
-                    for k in ["fotos_dev_b64","obs_dev","avs_dev","km_dev","sel_veic_dev"]:
+                    st.session_state.pop("dev_fotos_b64", None)
+                    for k in ["obs_dev","avs_dev","km_dev","sel_veic_dev"]:
                         st.session_state.pop(k, None)
                     st.success(f"✅ Devolução registrada! KM final: {km_dev}")
                     invalidar_cache()
@@ -1140,5 +1197,3 @@ if tab_gest:
                                 st.rerun()
                         else:
                             st.caption("Em uso")
-
-            
