@@ -123,13 +123,45 @@ def append_linha(aba, linha_dict, colunas):
 @st.cache_resource
 def inicializar_sistema():
     linha_paulo = ["Paulo","paulo","123","2030-12-31","Admin","Ativo"]
-    garantir_aba(ABA_MOT,  COLS_MOT,  linha_paulo)
-    garantir_aba(ABA_VEIC, COLS_VEIC)
-    garantir_aba(ABA_AVAR, COLS_AVAR)
-    garantir_aba(ABA_HIST, COLS_HIST)
-    df_m = ler_aba(ABA_MOT, COLS_MOT)
-    if df_m.empty:
-        append_linha(ABA_MOT, dict(zip(COLS_MOT, linha_paulo)), COLS_MOT)
+    try:
+        svc  = get_service()
+        meta = svc.get(spreadsheetId=SHEET_ID).execute()
+        abas_existentes = [s["properties"]["title"] for s in meta.get("sheets", [])]
+
+        # Garante todas as abas em uma única chamada de metadados
+        abas_necessarias = {
+            ABA_MOT:  (COLS_MOT,  linha_paulo),
+            ABA_VEIC: (COLS_VEIC, None),
+            ABA_AVAR: (COLS_AVAR, None),
+            ABA_HIST: (COLS_HIST, None),
+        }
+
+        for aba, (colunas, linha_padrao) in abas_necessarias.items():
+            if aba not in abas_existentes:
+                svc.batchUpdate(spreadsheetId=SHEET_ID,
+                    body={"requests":[{"addSheet":{"properties":{"title":aba}}}]}).execute()
+                vals = [colunas]
+                if linha_padrao:
+                    vals.append(linha_padrao)
+                svc.values().update(spreadsheetId=SHEET_ID, range=f"{aba}!A1",
+                    valueInputOption="RAW", body={"values": vals}).execute()
+            else:
+                res = svc.values().get(spreadsheetId=SHEET_ID, range=f"{aba}!A1:1").execute()
+                if not res.get("values"):
+                    vals = [colunas]
+                    if linha_padrao:
+                        vals.append(linha_padrao)
+                    svc.values().update(spreadsheetId=SHEET_ID, range=f"{aba}!A1",
+                        valueInputOption="RAW", body={"values": vals}).execute()
+
+        # Verifica se o usuário padrão existe
+        res_mot = svc.values().get(spreadsheetId=SHEET_ID, range=ABA_MOT).execute()
+        vals_mot = res_mot.get("values", [])
+        if len(vals_mot) <= 1:  # só cabeçalho ou vazio
+            append_linha(ABA_MOT, dict(zip(COLS_MOT, linha_paulo)), COLS_MOT)
+
+    except Exception as e:
+        st.error(f"Erro na inicialização: {e}")
 
 inicializar_sistema()
 
