@@ -577,11 +577,32 @@ with tab_ret:
                     if revisao_vencida(r):
                         st.warning("🔧 Atenção: revisão vencida! O veículo pode ser retirado mas precisa de manutenção.")
 
-        obs_ret  = st.text_area("Observações", key="obs_ret")
-        avs_ret  = st.multiselect("Avarias observadas na saída", av_ativas, key="avs_ret")
-        foto_ret_file = st.file_uploader("📷 Foto da retirada (opcional)", type=["jpg","jpeg","png"])
+        obs_ret = st.text_area("Observações", key="obs_ret")
+        avs_ret = st.multiselect("Avarias observadas na saída", av_ativas, key="avs_ret")
 
-        if st.button("✅ Confirmar Retirada", type="primary"):
+        # ── Upload múltiplo de fotos ─────────────────────────────────────────
+        st.markdown("**📷 Fotos da retirada (opcional)**")
+        fotos_ret = st.file_uploader(
+            "Selecione uma ou mais fotos",
+            type=["jpg","jpeg","png"],
+            accept_multiple_files=True,
+            key="fu_ret"
+        )
+        # Converte cada arquivo para base64 imediatamente ao carregar
+        if fotos_ret:
+            fotos_b64_list = []
+            cols_prev = st.columns(min(len(fotos_ret), 4))
+            for idx, f in enumerate(fotos_ret):
+                fotos_b64_list.append(imagem_para_base64(f.read()))
+                with cols_prev[idx % 4]:
+                    f.seek(0)
+                    st.image(f, caption=f.name, use_container_width=True)
+            st.session_state["fotos_ret_b64"] = "||".join(fotos_b64_list)
+        else:
+            if "fotos_ret_b64" not in st.session_state:
+                st.session_state["fotos_ret_b64"] = ""
+
+        if st.button("✅ Confirmar Retirada", type="primary", key="btn_confirmar_ret"):
             if not veic_sel_ret:
                 st.error("Selecione um veículo.")
             else:
@@ -590,24 +611,29 @@ with tab_ret:
                 if row_v.empty:
                     st.error("Veículo não encontrado.")
                 else:
-                    row_v = row_v.iloc[0]
+                    row_v    = row_v.iloc[0]
                     km_ini   = safe_get(row_v,"KM_Atual","0")
-                    foto_b64 = imagem_para_base64(foto_ret_file.read()) if foto_ret_file is not None else ""
+                    foto_b64 = st.session_state.get("fotos_ret_b64","")
                     append_linha(ABA_HIST,{
                         "Data":get_dt_br(),"Acao":"Retirada",
                         "Veiculo":safe_get(row_v,"Modelo",""),"Placa":placa_sel,
                         "Usuario":st.session_state.login_logado,
                         "KM_Inicial":km_ini,"KM_Final":"",
-                        "Avarias_Saida":";".join(st.session_state.get("avs_ret",avs_ret)),"Avarias_Chegada":"",
-                        "Foto_Base64":foto_b64,"Obs":st.session_state.get("obs_ret",obs_ret),
+                        "Avarias_Saida":";".join(st.session_state.get("avs_ret",[])),
+                        "Avarias_Chegada":"",
+                        "Foto_Base64":foto_b64,
+                        "Obs":st.session_state.get("obs_ret",""),
                         "Tipo_Manutencao":"","Empresa":"","Valor":""
                     },COLS_HIST)
                     df_v.loc[df_v["Placa"]==placa_sel,"Status"]="Em uso"
                     av_lista=[a for a in safe_get(row_v,"Avarias","").split(";") if a.strip()]
-                    for av in avs_ret:
+                    for av in st.session_state.get("avs_ret",[]):
                         if av not in av_lista: av_lista.append(av)
                     df_v.loc[df_v["Placa"]==placa_sel,"Avarias"]=";".join(av_lista)
                     salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
+                    # Limpa estados antes do rerun
+                    for k in ["fotos_ret_b64","obs_ret","avs_ret","fu_ret","sel_veic_ret"]:
+                        st.session_state.pop(k, None)
                     st.success(f"✅ Retirada registrada! KM saída: {km_ini}")
                     invalidar_cache()
                     st.rerun()
@@ -632,13 +658,33 @@ with tab_dev:
         st.info("Você não possui veículos para devolver.")
     else:
         av_ativas = sorted(df_av[df_av["Status"]=="Ativo"]["Descricao"].tolist()) if not df_av.empty and "Status" in df_av.columns else []
-        veic_dev      = st.selectbox("Veículo a Devolver *", [""]+veics_meus, key="sel_veic_dev")
-        km_dev        = st.number_input("KM Final *", min_value=0, step=1, key="km_dev")
-        obs_dev       = st.text_area("Observações", key="obs_dev")
-        avs_dev       = st.multiselect("Avarias na chegada", av_ativas, key="avs_dev")
-        foto_dev_file = st.file_uploader("📷 Foto da devolução (opcional)", type=["jpg","jpeg","png"])
+        veic_dev = st.selectbox("Veículo a Devolver *", [""]+veics_meus, key="sel_veic_dev")
+        km_dev   = st.number_input("KM Final *", min_value=0, step=1, key="km_dev")
+        obs_dev  = st.text_area("Observações", key="obs_dev")
+        avs_dev  = st.multiselect("Avarias na chegada", av_ativas, key="avs_dev")
 
-        if st.button("✅ Confirmar Devolução", type="primary"):
+        # ── Upload múltiplo de fotos ─────────────────────────────────────────
+        st.markdown("**📷 Fotos da devolução (opcional)**")
+        fotos_dev = st.file_uploader(
+            "Selecione uma ou mais fotos",
+            type=["jpg","jpeg","png"],
+            accept_multiple_files=True,
+            key="fu_dev"
+        )
+        if fotos_dev:
+            fotos_b64_list = []
+            cols_prev = st.columns(min(len(fotos_dev), 4))
+            for idx, f in enumerate(fotos_dev):
+                fotos_b64_list.append(imagem_para_base64(f.read()))
+                with cols_prev[idx % 4]:
+                    f.seek(0)
+                    st.image(f, caption=f.name, use_container_width=True)
+            st.session_state["fotos_dev_b64"] = "||".join(fotos_b64_list)
+        else:
+            if "fotos_dev_b64" not in st.session_state:
+                st.session_state["fotos_dev_b64"] = ""
+
+        if st.button("✅ Confirmar Devolução", type="primary", key="btn_confirmar_dev"):
             if not veic_dev:
                 st.error("Selecione um veículo.")
             else:
@@ -650,23 +696,26 @@ with tab_dev:
                     row_v = row_v.iloc[0]
                     hp = df_hist[(df_hist.get("Placa",pd.Series())==placa_dev)&(df_hist.get("Acao",pd.Series())=="Retirada")] if not df_hist.empty and "Placa" in df_hist.columns else pd.DataFrame()
                     km_ini_str = str(hp.iloc[-1].get("KM_Inicial","")) if not hp.empty else ""
-                    foto_b64   = imagem_para_base64(foto_dev_file.read()) if foto_dev_file is not None else ""
+                    foto_b64   = st.session_state.get("fotos_dev_b64","")
                     append_linha(ABA_HIST,{
                         "Data":get_dt_br(),"Acao":"Devolucao",
                         "Veiculo":safe_get(row_v,"Modelo",""),"Placa":placa_dev,
                         "Usuario":st.session_state.login_logado,
                         "KM_Inicial":km_ini_str,"KM_Final":str(km_dev),
-                        "Avarias_Saida":"","Avarias_Chegada":";".join(avs_dev),
-                        "Foto_Base64":foto_b64,"Obs":obs_dev,
+                        "Avarias_Saida":"","Avarias_Chegada":";".join(st.session_state.get("avs_dev",[])),
+                        "Foto_Base64":foto_b64,
+                        "Obs":st.session_state.get("obs_dev",""),
                         "Tipo_Manutencao":"","Empresa":"","Valor":""
                     },COLS_HIST)
                     df_v.loc[df_v["Placa"]==placa_dev,"Status"]="Disponível"
                     df_v.loc[df_v["Placa"]==placa_dev,"KM_Atual"]=str(km_dev)
                     av_lista=[a for a in safe_get(row_v,"Avarias","").split(";") if a.strip()]
-                    for av in avs_dev:
+                    for av in st.session_state.get("avs_dev",[]):
                         if av not in av_lista: av_lista.append(av)
                     df_v.loc[df_v["Placa"]==placa_dev,"Avarias"]=";".join(av_lista)
                     salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
+                    for k in ["fotos_dev_b64","obs_dev","avs_dev","km_dev","fu_dev","sel_veic_dev"]:
+                        st.session_state.pop(k, None)
                     st.success(f"✅ Devolução registrada! KM final: {km_dev}")
                     invalidar_cache()
                     st.rerun()
