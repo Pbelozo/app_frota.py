@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta, timezone
 import base64
+import time
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
@@ -45,25 +46,38 @@ COLS_AVAR = ["Descricao","Status"]
 # ─────────────────────────────────────────────
 # 3. FUNÇÕES GOOGLE SHEETS (COM CACHE)
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=30)  # ✅ CORREÇÃO: cache de 30 segundos para evitar erro 429
+@st.cache_data(ttl=30)  # ✅ cache de 30s para evitar erro 429
 def ler_aba(aba, colunas):
-    try:
-        svc  = get_service()
-        res  = svc.values().get(spreadsheetId=SHEET_ID, range=aba).execute()
-        vals = res.get("values", [])
-        if not vals:
+    tentativas = 3
+    for tentativa in range(1, tentativas + 1):
+        try:
+            svc  = get_service()
+            res  = svc.values().get(spreadsheetId=SHEET_ID, range=aba).execute()
+            vals = res.get("values", [])
+            if not vals:
+                return pd.DataFrame(columns=colunas)
+            header    = vals[0]
+            rows      = vals[1:] if len(vals) > 1 else []
+            rows_norm = [r + [""] * (len(header) - len(r)) for r in rows]
+            df = pd.DataFrame(rows_norm, columns=header)
+            for col in colunas:
+                if col not in df.columns:
+                    df[col] = ""
+            return df.fillna("")
+        except Exception as e:
+            erro_str = str(e)
+            # Broken pipe / connection reset: tenta reconectar
+            if tentativa < tentativas and any(x in erro_str for x in ["Broken pipe","Connection reset","timed out","RemoteDisconnected"]):
+                get_service.clear()  # força reconexão na próxima chamada
+                time.sleep(2 * tentativa)
+                continue
+            # Quota excedida: espera mais antes de tentar
+            if tentativa < tentativas and "429" in erro_str:
+                time.sleep(5 * tentativa)
+                continue
+            st.error(f"Erro ao ler {aba}: {e}")
             return pd.DataFrame(columns=colunas)
-        header    = vals[0]
-        rows      = vals[1:] if len(vals) > 1 else []
-        rows_norm = [r + [""] * (len(header) - len(r)) for r in rows]
-        df = pd.DataFrame(rows_norm, columns=header)
-        for col in colunas:
-            if col not in df.columns:
-                df[col] = ""
-        return df.fillna("")
-    except Exception as e:
-        st.error(f"Erro ao ler {aba}: {e}")
-        return pd.DataFrame(columns=colunas)
+    return pd.DataFrame(columns=colunas)
 
 def invalidar_cache():
     """✅ CORREÇÃO: limpa o cache após salvar dados novos"""
