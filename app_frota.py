@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime, date, timedelta, timezone
 import base64
 import time
+import io
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
@@ -108,28 +109,61 @@ def garantir_aba(aba, colunas, linha_padrao=None):
         st.error(f"Erro ao garantir {aba}: {e}")
 
 def salvar_aba(df, aba, colunas):
-    try:
-        svc = get_service()
-        for col in colunas:
-            if col not in df.columns:
-                df[col] = ""
-        df     = df[colunas].fillna("")
-        valores = [colunas] + df.values.tolist()
-        svc.values().clear(spreadsheetId=SHEET_ID, range=aba).execute()
-        svc.values().update(spreadsheetId=SHEET_ID, range=f"{aba}!A1",
-            valueInputOption="RAW", body={"values": valores}).execute()
-    except Exception as e:
-        st.error(f"Erro ao salvar {aba}: {e}")
+    for tentativa in range(1, 4):
+        try:
+            svc = get_service()
+            for col in colunas:
+                if col not in df.columns:
+                    df[col] = ""
+            df_save  = df[colunas].fillna("")
+            valores  = [colunas] + df_save.values.tolist()
+            svc.values().clear(spreadsheetId=SHEET_ID, range=aba).execute()
+            svc.values().update(spreadsheetId=SHEET_ID, range=f"{aba}!A1",
+                valueInputOption="RAW", body={"values": valores}).execute()
+            return
+        except Exception as e:
+            erro_str = str(e)
+            if tentativa < 3 and any(x in erro_str for x in ["Broken pipe","Connection reset","timed out","RemoteDisconnected","429"]):
+                get_service.clear()
+                time.sleep(2 * tentativa)
+                continue
+            st.error(f"Erro ao salvar {aba}: {e}")
+            return
 
 def append_linha(aba, linha_dict, colunas):
-    try:
-        svc   = get_service()
-        linha = [str(linha_dict.get(c, "")) for c in colunas]
-        svc.values().append(spreadsheetId=SHEET_ID, range=f"{aba}!A1",
-            valueInputOption="RAW", insertDataOption="INSERT_ROWS",
-            body={"values": [linha]}).execute()
-    except Exception as e:
-        st.error(f"Erro ao adicionar linha em {aba}: {e}")
+    """Salva linha no Sheets. Se falhar por tamanho da foto, salva sem a foto."""
+    for tentativa in range(1, 4):
+        try:
+            svc   = get_service()
+            linha = [str(linha_dict.get(c, "")) for c in colunas]
+            svc.values().append(spreadsheetId=SHEET_ID, range=f"{aba}!A1",
+                valueInputOption="RAW", insertDataOption="INSERT_ROWS",
+                body={"values": [linha]}).execute()
+            return  # sucesso
+        except Exception as e:
+            erro_str = str(e)
+            # Se payload muito grande, salva sem fotos
+            if "413" in erro_str or "Request Entity Too Large" in erro_str or len(str(linha_dict.get("Foto_Base64",""))) > 40000:
+                linha_dict_sem_foto = dict(linha_dict)
+                linha_dict_sem_foto["Foto_Base64"] = "[foto omitida: arquivo muito grande]"
+                try:
+                    svc   = get_service()
+                    linha = [str(linha_dict_sem_foto.get(c, "")) for c in colunas]
+                    svc.values().append(spreadsheetId=SHEET_ID, range=f"{aba}!A1",
+                        valueInputOption="RAW", insertDataOption="INSERT_ROWS",
+                        body={"values": [linha]}).execute()
+                    st.warning("⚠️ Registro salvo, mas as fotos foram omitidas por serem muito grandes. Use fotos menores.")
+                    return
+                except Exception as e2:
+                    st.error(f"Erro ao salvar registro em {aba}: {e2}")
+                    return
+            # Broken pipe / timeout: reconecta e tenta novamente
+            if tentativa < 3 and any(x in erro_str for x in ["Broken pipe","Connection reset","timed out","RemoteDisconnected","429"]):
+                get_service.clear()
+                time.sleep(2 * tentativa)
+                continue
+            st.error(f"Erro ao adicionar linha em {aba}: {e}")
+            return
 
 # ─────────────────────────────────────────────
 # 4. INICIALIZAÇÃO (✅ CORREÇÃO: cache_resource para rodar só uma vez)
@@ -311,11 +345,34 @@ def avaria_em_uso(descricao):
             return True
     return False
 
-def imagem_para_base64(img_bytes):
+def imagem_para_base64(img_bytes, max_kb=200):
+    """Converte imagem para base64, comprimindo se necessário para max_kb KB."""
     try:
-        return base64.b64encode(img_bytes).decode()
+        from PIL import Image
+        img = Image.open(io.BytesIO(img_bytes))
+        # Converte para RGB se necessário
+        if img.mode not in ("RGB","L"):
+            img = img.convert("RGB")
+        # Redimensiona se muito grande (máx 1200px no lado maior)
+        max_dim = 1200
+        if max(img.width, img.height) > max_dim:
+            ratio = max_dim / max(img.width, img.height)
+            img = img.resize((int(img.width*ratio), int(img.height*ratio)), Image.LANCZOS)
+        # Comprime com qualidade progressiva até caber em max_kb
+        quality = 85
+        while quality >= 40:
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality, optimize=True)
+            if buf.tell() <= max_kb * 1024:
+                break
+            quality -= 15
+        buf.seek(0)
+        return base64.b64encode(buf.read()).decode()
     except Exception:
-        return ""
+        try:
+            return base64.b64encode(img_bytes).decode()
+        except Exception:
+            return ""
 
 def widget_fotos(prefixo: str, label: str):
     """
