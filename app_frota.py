@@ -827,43 +827,59 @@ with tab_ofc:
         if not veics_com_av:
             st.info("Nenhum veículo com avarias pendentes.")
         else:
-            with st.form("form_reparo"):
-                veic_rep    = st.selectbox("Veículo com Avarias *", [""]+veics_com_av)
-                empresa_rep = st.text_input("Empresa *")
-                valor_rep   = st.number_input("Valor (R$)", min_value=0.0, step=0.01, format="%.2f")
-                obs_rep     = st.text_area("Observações")
-                avs_corrigir = []
-                if veic_rep:
-                    placa_prev = veic_rep.split("(")[-1].replace(")","").strip()
-                    row_rep = df_v[df_v["Placa"]==placa_prev]
-                    if not row_rep.empty:
-                        avs_corrigir = st.multiselect("Avarias corrigidas *",
-                            [a.strip() for a in safe_get(row_rep.iloc[0],"Avarias","").split(";") if a.strip()])
-                if st.form_submit_button("✅ Registrar Reparo"):
-                    if not veic_rep or not empresa_rep:
-                        st.error("Veículo e Empresa são obrigatórios.")
-                    elif not avs_corrigir:
-                        st.error("Selecione ao menos uma avaria corrigida.")
-                    else:
-                        placa_rep = veic_rep.split("(")[-1].replace(")","").strip()
-                        row_v2 = df_v[df_v["Placa"]==placa_rep]
-                        if not row_v2.empty:
-                            append_linha(ABA_HIST,{
-                                "Data":get_dt_br(),"Acao":"Reparo",
-                                "Veiculo":safe_get(row_v2.iloc[0],"Modelo",""),"Placa":placa_rep,
-                                "Usuario":st.session_state.login_logado,
-                                "KM_Inicial":safe_get(row_v2.iloc[0],"KM_Atual",""),"KM_Final":"",
-                                "Avarias_Saida":";".join(avs_corrigir),"Avarias_Chegada":"",
-                                "Foto_Base64":"","Obs":obs_rep,
-                                "Tipo_Manutencao":"Reparo","Empresa":empresa_rep,"Valor":str(valor_rep)
-                            },COLS_HIST)
-                            restantes=[a.strip() for a in safe_get(row_v2.iloc[0],"Avarias","").split(";")
-                                       if a.strip() and a.strip() not in avs_corrigir]
-                            df_v.loc[df_v["Placa"]==placa_rep,"Avarias"]=";".join(restantes)
-                            salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
-                            st.success(f"Reparo registrado! Avarias removidas: {', '.join(avs_corrigir)}")
-                            invalidar_cache()  # ✅ CORREÇÃO
-                            st.rerun()
+            # ── Seleção do veículo fora do form para alimentar o multiselect dinamicamente
+            veic_rep = st.selectbox("Veículo com Avarias *", [""]+veics_com_av, key="sel_veic_rep")
+
+            avs_do_veiculo = []
+            if veic_rep:
+                placa_prev = veic_rep.split("(")[-1].replace(")","").strip()
+                row_rep = df_v[df_v["Placa"]==placa_prev]
+                if not row_rep.empty:
+                    avs_do_veiculo = [a.strip() for a in safe_get(row_rep.iloc[0],"Avarias","").split(";") if a.strip()]
+                    if avs_do_veiculo:
+                        with st.container(border=True):
+                            st.markdown(f"**⚠️ Avarias registradas no veículo:** {', '.join(avs_do_veiculo)}")
+
+            avs_corrigir = st.multiselect(
+                "Selecione as avarias que serão reparadas *",
+                options=avs_do_veiculo,
+                default=[],
+                key="avs_rep",
+                disabled=not avs_do_veiculo,
+                placeholder="Selecione o veículo primeiro..." if not veic_rep else "Escolha as avarias..."
+            )
+
+            empresa_rep = st.text_input("Empresa *", key="empresa_rep")
+            valor_rep   = st.number_input("Valor (R$)", min_value=0.0, step=0.01, format="%.2f", key="valor_rep")
+            obs_rep     = st.text_area("Observações", key="obs_rep_rep")
+
+            if st.button("✅ Registrar Reparo", type="primary", key="btn_reparo"):
+                if not veic_rep or not empresa_rep:
+                    st.error("Veículo e Empresa são obrigatórios.")
+                elif not avs_corrigir:
+                    st.error("Selecione ao menos uma avaria a ser reparada.")
+                else:
+                    placa_rep = veic_rep.split("(")[-1].replace(")","").strip()
+                    row_v2 = df_v[df_v["Placa"]==placa_rep]
+                    if not row_v2.empty:
+                        append_linha(ABA_HIST,{
+                            "Data":get_dt_br(),"Acao":"Reparo",
+                            "Veiculo":safe_get(row_v2.iloc[0],"Modelo",""),"Placa":placa_rep,
+                            "Usuario":st.session_state.login_logado,
+                            "KM_Inicial":safe_get(row_v2.iloc[0],"KM_Atual",""),"KM_Final":"",
+                            "Avarias_Saida":";".join(avs_corrigir),"Avarias_Chegada":"",
+                            "Foto_Base64":"","Obs":obs_rep,
+                            "Tipo_Manutencao":"Reparo","Empresa":empresa_rep,"Valor":str(valor_rep)
+                        },COLS_HIST)
+                        restantes=[a.strip() for a in safe_get(row_v2.iloc[0],"Avarias","").split(";")
+                                   if a.strip() and a.strip() not in avs_corrigir]
+                        df_v.loc[df_v["Placa"]==placa_rep,"Avarias"]=";".join(restantes)
+                        salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
+                        for k in ["sel_veic_rep","avs_rep","empresa_rep","valor_rep","obs_rep_rep"]:
+                            st.session_state.pop(k, None)
+                        st.success(f"✅ Reparo registrado! Avarias corrigidas: {', '.join(avs_corrigir)}")
+                        invalidar_cache()
+                        st.rerun()
 
 # ─────────────────────────────────────────────
 # 12. HISTÓRICO
