@@ -581,6 +581,9 @@ with tab_ret:
                         salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
                         st.success(f"Retirada registrada! KM saída: {km_ini}")
                         invalidar_cache()  # ✅ CORREÇÃO
+                        # ✅ CORREÇÃO: limpa o uploader antes do rerun para evitar erro de deserialização
+                        if "foto_retirada" in st.session_state:
+                            del st.session_state["foto_retirada"]
                         st.rerun()
 
 # ─────────────────────────────────────────────
@@ -641,6 +644,9 @@ with tab_dev:
                         salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
                         st.success(f"Devolução registrada! KM final: {km_dev}")
                         invalidar_cache()  # ✅ CORREÇÃO
+                        # ✅ CORREÇÃO: limpa o uploader antes do rerun para evitar erro de deserialização
+                        if "foto_devolucao" in st.session_state:
+                            del st.session_state["foto_devolucao"]
                         st.rerun()
 
 # ─────────────────────────────────────────────
