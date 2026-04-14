@@ -379,48 +379,61 @@ def imagem_para_base64(img_bytes, max_kb=400):
 def widget_fotos(prefixo: str, label: str):
     """
     Widget de fotos com câmera e upload múltiplo.
-    Converte imediatamente para base64 — sem st.rerun() para não bloquear confirmação.
-    Armazena lista em st.session_state[f"{prefixo}_fotos_b64"].
+    Armazena lista de base64 em st.session_state[f"{prefixo}_fotos_b64"].
     """
-    key_list = f"{prefixo}_fotos_b64"
-    key_cam  = f"{prefixo}_cam_idx"
-    key_upk  = f"{prefixo}_up_key"
+    key_list    = f"{prefixo}_fotos_b64"
+    key_cam_idx = f"{prefixo}_cam_idx"
+    key_up_idx  = f"{prefixo}_up_idx"
+    key_cam_ok  = f"{prefixo}_cam_ok"   # set de hashes já processados da câmera
+    key_up_ok   = f"{prefixo}_up_ok"    # set de hashes já processados do upload
 
-    if key_list not in st.session_state: st.session_state[key_list] = []
-    if key_cam  not in st.session_state: st.session_state[key_cam]  = 0
-    if key_upk  not in st.session_state: st.session_state[key_upk]  = 0
+    if key_list    not in st.session_state: st.session_state[key_list]    = []
+    if key_cam_idx not in st.session_state: st.session_state[key_cam_idx] = 0
+    if key_up_idx  not in st.session_state: st.session_state[key_up_idx]  = 0
+    if key_cam_ok  not in st.session_state: st.session_state[key_cam_ok]  = set()
+    if key_up_ok   not in st.session_state: st.session_state[key_up_ok]   = set()
 
     st.markdown(f"**📷 {label}**")
-
     aba_cam, aba_up = st.tabs(["📸 Câmera", "🖼️ Upload de arquivos"])
 
+    # ── Aba câmera ───────────────────────────────────────────────────────────
     with aba_cam:
-        # Tamanho menor: width=300
-        cam = st.camera_input("Tirar foto", key=f"cam_{prefixo}_{st.session_state[key_cam]}")
+        cam = st.camera_input("Tirar foto",
+                              key=f"cam_{prefixo}_{st.session_state[key_cam_idx]}")
         if cam is not None:
-            b64 = imagem_para_base64(cam.read())
-            if b64 not in st.session_state[key_list]:   # evita duplicata
-                st.session_state[key_list].append(b64)
-                st.session_state[key_cam] += 1          # reseta câmera sem rerun global
-        if st.button("📸 Confirmar foto e tirar outra", key=f"btn_cam_{prefixo}"):
-            st.session_state[key_cam] += 1
+            cam_hash = hash(cam.name + str(cam.size))
+            if cam_hash not in st.session_state[key_cam_ok]:
+                raw = cam.read()
+                b64 = imagem_para_base64(raw)
+                if b64:
+                    st.session_state[key_list].append(b64)
+                    st.session_state[key_cam_ok].add(cam_hash)
+        if st.button("📸 Adicionar foto e tirar outra", key=f"btn_nova_cam_{prefixo}"):
+            st.session_state[key_cam_idx] += 1
+            st.rerun()
 
+    # ── Aba upload ────────────────────────────────────────────────────────────
     with aba_up:
         uploads = st.file_uploader(
             "Selecione uma ou mais imagens",
             type=["jpg","jpeg","png"],
             accept_multiple_files=True,
-            key=f"up_{prefixo}_{st.session_state[key_upk]}"
+            key=f"up_{prefixo}_{st.session_state[key_up_idx]}"
         )
-        if uploads:
-            novos = [imagem_para_base64(f.read()) for f in uploads]
-            for b in novos:
-                if b not in st.session_state[key_list]:
-                    st.session_state[key_list].append(b)
-            if st.button("✅ Confirmar upload", key=f"btn_up_{prefixo}"):
-                st.session_state[key_upk] += 1
+        if st.button("✅ Adicionar fotos selecionadas", key=f"btn_add_up_{prefixo}"):
+            if uploads:
+                for f in uploads:
+                    fhash = hash(f.name + str(f.size))
+                    if fhash not in st.session_state[key_up_ok]:
+                        raw = f.read()
+                        b64 = imagem_para_base64(raw)
+                        if b64:
+                            st.session_state[key_list].append(b64)
+                            st.session_state[key_up_ok].add(fhash)
+                st.session_state[key_up_idx] += 1
+                st.rerun()
 
-    # Miniaturas menores (width fixo via HTML) com botão remover
+    # ── Preview com botão remover ─────────────────────────────────────────────
     fotos = st.session_state[key_list]
     if fotos:
         st.markdown(f"**{len(fotos)} foto(s) adicionada(s):**")
@@ -429,14 +442,14 @@ def widget_fotos(prefixo: str, label: str):
         for idx, b64 in enumerate(fotos):
             with cols[idx % 4]:
                 try:
-                    img_bytes = base64.b64decode(b64)
-                    st.image(img_bytes, width=150)
+                    st.image(base64.b64decode(b64), width=150)
                 except Exception:
-                    st.warning("Imagem inválida")
-                if st.button("🗑️", key=f"rm_{prefixo}_{idx}", help="Remover foto"):
+                    st.caption("Imagem inválida")
+                if st.button("🗑️ Remover", key=f"rm_{prefixo}_{idx}"):
                     to_remove = idx
         if to_remove is not None:
             st.session_state[key_list].pop(to_remove)
+            st.rerun()
     else:
         st.caption("Nenhuma foto adicionada ainda.")
 
@@ -1344,4 +1357,3 @@ if tab_gest:
                                 st.rerun()
                         else:
                             st.caption("Em uso")
-
