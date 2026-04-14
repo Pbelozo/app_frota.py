@@ -533,9 +533,16 @@ with tab_ret:
     df_m = ler_aba(ABA_MOT, COLS_MOT)
     mot_row = df_m[df_m["Login"]==st.session_state.login_logado].iloc[0] if (
         not df_m.empty and "Login" in df_m.columns and st.session_state.login_logado in df_m["Login"].values) else None
-    if mot_row is not None and not cnh_valida(mot_row):
-        st.error("⚠️ Sua CNH está vencida. Retirada não permitida.")
-        st.stop()
+
+    # ── Validações do motorista ──────────────────────────────────────────────
+    if mot_row is not None:
+        status_mot = str(mot_row.get("Status","")).strip()
+        if status_mot == "Bloqueado":
+            st.error("🚫 Seu acesso está bloqueado. Retirada não permitida.")
+            st.stop()
+        if not cnh_valida(mot_row):
+            st.error("⚠️ Sua CNH está vencida. Retirada não permitida.")
+            st.stop()
 
     df_v  = ler_aba(ABA_VEIC, COLS_VEIC)
     df_av = ler_aba(ABA_AVAR, COLS_AVAR)
@@ -546,24 +553,57 @@ with tab_ret:
         st.info("Nenhum veículo disponível para retirada.")
     else:
         av_ativas = sorted(df_av[df_av["Status"]=="Ativo"]["Descricao"].tolist()) if not df_av.empty and "Status" in df_av.columns else []
-        # ✅ CORREÇÃO: file_uploader fora do form para evitar erro de deserialização
-        foto_ret = st.file_uploader("Foto da retirada (opcional)", type=["jpg","jpeg","png"], key="foto_retirada")
+
+        # ── Seleção de veículo e exibição de informações ─────────────────────
+        veic_sel_ret = st.selectbox("Veículo *", [""]+lista_veics, key="sel_veic_ret")
+
+        if veic_sel_ret:
+            placa_prev = veic_sel_ret.split("(")[-1].replace(")","").strip()
+            row_prev = df_v[df_v["Placa"]==placa_prev]
+            if not row_prev.empty:
+                r = row_prev.iloc[0]
+                with st.container(border=True):
+                    st.markdown("**📋 Informações do Veículo**")
+                    c1, c2, c3 = st.columns(3)
+                    with c1:
+                        st.metric("KM Atual", safe_get(r,"KM_Atual","—"))
+                    with c2:
+                        st.metric("Última Revisão", safe_get(r,"Ultima_Revisao","—"))
+                    with c3:
+                        avarias_atuais = [a.strip() for a in safe_get(r,"Avarias","").split(";") if a.strip()]
+                        st.metric("Avarias", len(avarias_atuais))
+                    if avarias_atuais:
+                        st.warning(f"⚠️ Avarias registradas: {', '.join(avarias_atuais)}")
+                    if revisao_vencida(r):
+                        st.warning("🔧 Atenção: revisão vencida! O veículo pode ser retirado mas precisa de manutenção.")
+
+        # ── Foto: capturada fora de qualquer form ────────────────────────────
+        foto_ret_file = st.file_uploader(
+            "📷 Foto da retirada (opcional)", type=["jpg","jpeg","png"],
+            key="uploader_retirada"
+        )
+        # Converte imediatamente para base64 e guarda no session_state
+        if foto_ret_file is not None:
+            st.session_state["foto_ret_b64"] = imagem_para_base64(foto_ret_file.read())
+            st.success("✅ Foto carregada com sucesso.")
+        elif "foto_ret_b64" not in st.session_state:
+            st.session_state["foto_ret_b64"] = ""
+
         with st.form("form_retirada"):
-            veic_sel = st.selectbox("Veículo *", [""]+lista_veics)
             obs_ret  = st.text_area("Observações")
             avs_ret  = st.multiselect("Avarias observadas na saída", av_ativas)
             if st.form_submit_button("✅ Confirmar Retirada"):
-                if not veic_sel:
+                if not veic_sel_ret:
                     st.error("Selecione um veículo.")
                 else:
-                    placa_sel = veic_sel.split("(")[-1].replace(")","").strip()
+                    placa_sel = veic_sel_ret.split("(")[-1].replace(")","").strip()
                     row_v = df_v[df_v["Placa"]==placa_sel]
                     if row_v.empty:
                         st.error("Veículo não encontrado.")
                     else:
                         row_v = row_v.iloc[0]
-                        km_ini = safe_get(row_v,"KM_Atual","0")
-                        foto_b64 = imagem_para_base64(foto_ret.read()) if foto_ret else ""
+                        km_ini   = safe_get(row_v,"KM_Atual","0")
+                        foto_b64 = st.session_state.pop("foto_ret_b64", "")
                         append_linha(ABA_HIST,{
                             "Data":get_dt_br(),"Acao":"Retirada",
                             "Veiculo":safe_get(row_v,"Modelo",""),"Placa":placa_sel,
@@ -579,11 +619,9 @@ with tab_ret:
                             if av not in av_lista: av_lista.append(av)
                         df_v.loc[df_v["Placa"]==placa_sel,"Avarias"]=";".join(av_lista)
                         salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
-                        st.success(f"Retirada registrada! KM saída: {km_ini}")
-                        invalidar_cache()  # ✅ CORREÇÃO
-                        # ✅ CORREÇÃO: limpa o uploader antes do rerun para evitar erro de deserialização
-                        if "foto_retirada" in st.session_state:
-                            del st.session_state["foto_retirada"]
+                        st.session_state.pop("uploader_retirada", None)
+                        st.success(f"✅ Retirada registrada! KM saída: {km_ini}")
+                        invalidar_cache()
                         st.rerun()
 
 # ─────────────────────────────────────────────
@@ -606,8 +644,17 @@ with tab_dev:
         st.info("Você não possui veículos para devolver.")
     else:
         av_ativas = sorted(df_av[df_av["Status"]=="Ativo"]["Descricao"].tolist()) if not df_av.empty and "Status" in df_av.columns else []
-        # ✅ CORREÇÃO: file_uploader fora do form para evitar erro de deserialização
-        foto_dev = st.file_uploader("Foto da devolução (opcional)", type=["jpg","jpeg","png"], key="foto_devolucao")
+        # ── Foto: convertida imediatamente para base64 fora do form ────────
+        foto_dev_file = st.file_uploader(
+            "📷 Foto da devolução (opcional)", type=["jpg","jpeg","png"],
+            key="uploader_devolucao"
+        )
+        if foto_dev_file is not None:
+            st.session_state["foto_dev_b64"] = imagem_para_base64(foto_dev_file.read())
+            st.success("✅ Foto carregada com sucesso.")
+        elif "foto_dev_b64" not in st.session_state:
+            st.session_state["foto_dev_b64"] = ""
+
         with st.form("form_devolucao"):
             veic_dev = st.selectbox("Veículo a Devolver *", [""]+veics_meus)
             km_dev   = st.number_input("KM Final *", min_value=0, step=1)
@@ -625,7 +672,7 @@ with tab_dev:
                         row_v = row_v.iloc[0]
                         hp = df_hist[(df_hist.get("Placa",pd.Series())==placa_dev)&(df_hist.get("Acao",pd.Series())=="Retirada")] if not df_hist.empty and "Placa" in df_hist.columns else pd.DataFrame()
                         km_ini_str = str(hp.iloc[-1].get("KM_Inicial","")) if not hp.empty else ""
-                        foto_b64   = imagem_para_base64(foto_dev.read()) if foto_dev else ""
+                        foto_b64   = st.session_state.pop("foto_dev_b64", "")
                         append_linha(ABA_HIST,{
                             "Data":get_dt_br(),"Acao":"Devolucao",
                             "Veiculo":safe_get(row_v,"Modelo",""),"Placa":placa_dev,
@@ -642,11 +689,9 @@ with tab_dev:
                             if av not in av_lista: av_lista.append(av)
                         df_v.loc[df_v["Placa"]==placa_dev,"Avarias"]=";".join(av_lista)
                         salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
-                        st.success(f"Devolução registrada! KM final: {km_dev}")
-                        invalidar_cache()  # ✅ CORREÇÃO
-                        # ✅ CORREÇÃO: limpa o uploader antes do rerun para evitar erro de deserialização
-                        if "foto_devolucao" in st.session_state:
-                            del st.session_state["foto_devolucao"]
+                        st.session_state.pop("uploader_devolucao", None)
+                        st.success(f"✅ Devolução registrada! KM final: {km_dev}")
+                        invalidar_cache()
                         st.rerun()
 
 # ─────────────────────────────────────────────
