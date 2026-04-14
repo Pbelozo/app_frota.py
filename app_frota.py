@@ -890,8 +890,8 @@ with tab_hist:
     if df_hist.empty:
         st.info("Nenhum registro no histórico.")
     else:
-        with st.expander("🔍 Filtros"):
-            col_f1,col_f2,col_f3,col_f4 = st.columns(4)
+        with st.expander("🔍 Filtros", expanded=True):
+            col_f1, col_f2, col_f3 = st.columns(3)
             with col_f1:
                 veics_h  = ["Todos"]+sorted(df_hist["Veiculo"].unique().tolist()) if "Veiculo" in df_hist.columns else ["Todos"]
                 filtro_v = st.selectbox("Veículo", veics_h, key="filt_veic")
@@ -901,23 +901,41 @@ with tab_hist:
             with col_f3:
                 acoes_h  = ["Todos","Retirada","Devolucao","Reparo","Manutencao"]
                 filtro_a = st.selectbox("Ação", acoes_h, key="filt_acao")
-            with col_f4:
-                filtro_data = st.text_input("Data (dd/mm) — parcial", key="filt_data")
+
+            # ── Filtro de período com data início e fim ──────────────────────
+            col_d1, col_d2 = st.columns(2)
+            with col_d1:
+                filtro_dt_ini = st.date_input("Data início", value=None, key="filt_dt_ini",
+                                              help="Deixe em branco para não filtrar por data de início")
+            with col_d2:
+                filtro_dt_fim = st.date_input("Data fim", value=None, key="filt_dt_fim",
+                                              help="Deixe em branco para não filtrar por data de fim")
 
         df_show = df_hist.copy()
-        if filtro_v!="Todos" and "Veiculo" in df_show.columns:
+        if filtro_v != "Todos" and "Veiculo" in df_show.columns:
             df_show = df_show[df_show["Veiculo"]==filtro_v]
-        if filtro_u!="Todos" and "Usuario" in df_show.columns:
+        if filtro_u != "Todos" and "Usuario" in df_show.columns:
             df_show = df_show[df_show["Usuario"]==filtro_u]
-        if filtro_a!="Todos" and "Acao" in df_show.columns:
+        if filtro_a != "Todos" and "Acao" in df_show.columns:
             df_show = df_show[df_show["Acao"]==filtro_a]
-        if filtro_data.strip() and "Data" in df_show.columns:
-            df_show = df_show[df_show["Data"].str.contains(filtro_data.strip(),na=False)]
+
+        # ── Filtra por período convertendo a coluna Data (dd/mm/yyyy HH:MM) ──
+        if (filtro_dt_ini or filtro_dt_fim) and "Data" in df_show.columns:
+            def parse_data_hist(s):
+                try:
+                    return datetime.strptime(str(s).strip()[:10], "%d/%m/%Y").date()
+                except Exception:
+                    return None
+            datas_parsed = df_show["Data"].apply(parse_data_hist)
+            if filtro_dt_ini:
+                df_show = df_show[datas_parsed >= filtro_dt_ini]
+                datas_parsed = datas_parsed[datas_parsed >= filtro_dt_ini]
+            if filtro_dt_fim:
+                df_show = df_show[datas_parsed <= filtro_dt_fim]
 
         # ── Monta colunas legíveis e renomeia para exibição ──────────────────
         df_exib = df_show.copy()
 
-        # Para registros de Reparo: popula coluna "Avarias Reparadas" e "Avarias Restantes"
         def avarias_restantes_reparo(row, df_veic):
             if str(row.get("Acao","")) != "Reparo":
                 return ""
@@ -929,21 +947,26 @@ with tab_hist:
 
         df_v_atual = ler_aba(ABA_VEIC, COLS_VEIC)
 
-        # Colunas derivadas
+        # ── Avarias Reparadas: só para Reparo (usa Avarias_Saida) ────────────
         df_exib["Avarias Reparadas"] = df_exib.apply(
             lambda r: ", ".join([a for a in str(r.get("Avarias_Saida","")).split(";") if a.strip()])
             if str(r.get("Acao",""))=="Reparo" else "", axis=1)
 
+        # ── Avarias Restantes: só para Reparo ────────────────────────────────
         df_exib["Avarias Restantes"] = df_exib.apply(
             lambda r: avarias_restantes_reparo(r, df_v_atual)
             if str(r.get("Acao",""))=="Reparo" else "", axis=1)
 
-        df_exib["Avarias Saída"]    = df_exib["Avarias_Saida"].apply(
-            lambda v: ", ".join([a for a in str(v).split(";") if a.strip()]) if str(v) else "")
-        df_exib["Avarias Chegada"]  = df_exib["Avarias_Chegada"].apply(
+        # ── Avarias Saída: só para Retirada (limpa Reparo) ───────────────────
+        df_exib["Avarias Saída"] = df_exib.apply(
+            lambda r: ", ".join([a for a in str(r.get("Avarias_Saida","")).split(";") if a.strip()])
+            if str(r.get("Acao","")) != "Reparo" else "", axis=1)
+
+        # ── Avarias Chegada: só para Devolução ───────────────────────────────
+        df_exib["Avarias Chegada"] = df_exib["Avarias_Chegada"].apply(
             lambda v: ", ".join([a for a in str(v).split(";") if a.strip()]) if str(v) else "")
 
-        # Renomeia colunas para português amigável
+        # ── Renomeia colunas ──────────────────────────────────────────────────
         rename_map = {
             "Data":"Data","Acao":"Ação","Veiculo":"Veículo","Placa":"Placa",
             "Usuario":"Motorista","KM_Inicial":"KM Saída","KM_Final":"KM Chegada",
@@ -952,22 +975,47 @@ with tab_hist:
         cols_base = [c for c in rename_map if c in df_exib.columns]
         df_final  = df_exib[cols_base].rename(columns=rename_map)
 
-        # Insere colunas de avarias na posição certa
         insert_at = df_final.columns.tolist().index("KM Chegada") + 1
-        df_final.insert(insert_at,   "Avarias Saída",    df_exib["Avarias Saída"].values)
-        df_final.insert(insert_at+1, "Avarias Chegada",  df_exib["Avarias Chegada"].values)
-        df_final.insert(insert_at+2, "Avarias Reparadas",df_exib["Avarias Reparadas"].values)
-        df_final.insert(insert_at+3, "Avarias Restantes",df_exib["Avarias Restantes"].values)
+        df_final.insert(insert_at,   "Avarias Saída",     df_exib["Avarias Saída"].values)
+        df_final.insert(insert_at+1, "Avarias Chegada",   df_exib["Avarias Chegada"].values)
+        df_final.insert(insert_at+2, "Avarias Reparadas", df_exib["Avarias Reparadas"].values)
+        df_final.insert(insert_at+3, "Avarias Restantes", df_exib["Avarias Restantes"].values)
 
+        # ── Exibe como cards expansíveis para melhor leitura ─────────────────
         st.dataframe(
             df_final.reset_index(drop=True),
             use_container_width=True,
+            height=400,
             column_config={
-                "Valor (R$)": st.column_config.NumberColumn(format="R$ %.2f"),
-                "Avarias Reparadas": st.column_config.TextColumn(width="medium"),
-                "Avarias Restantes": st.column_config.TextColumn(width="medium"),
+                "Valor (R$)":        st.column_config.NumberColumn(format="R$ %.2f"),
+                "Avarias Saída":     st.column_config.TextColumn(width="large"),
+                "Avarias Chegada":   st.column_config.TextColumn(width="large"),
+                "Avarias Reparadas": st.column_config.TextColumn(width="large"),
+                "Avarias Restantes": st.column_config.TextColumn(width="large"),
+                "Observações":       st.column_config.TextColumn(width="large"),
+                "Data":              st.column_config.TextColumn(width="medium"),
+                "Ação":              st.column_config.TextColumn(width="small"),
+                "Veículo":           st.column_config.TextColumn(width="small"),
+                "Placa":             st.column_config.TextColumn(width="small"),
+                "Motorista":         st.column_config.TextColumn(width="small"),
+                "KM Saída":          st.column_config.TextColumn(width="small"),
+                "KM Chegada":        st.column_config.TextColumn(width="small"),
             }
         )
+
+        # ── Detalhe expandido por linha para leitura completa ────────────────
+        with st.expander("🔎 Ver detalhes completos de um registro"):
+            idx_sel = st.number_input("Número da linha (0 = primeira)",
+                                      min_value=0, max_value=max(0, len(df_final)-1),
+                                      step=1, key="hist_detail_idx")
+            if not df_final.empty:
+                row_sel = df_final.iloc[int(idx_sel)]
+                c1, c2 = st.columns(2)
+                for i, (col, val) in enumerate(row_sel.items()):
+                    with (c1 if i % 2 == 0 else c2):
+                        if str(val) not in ("", "nan", "None"):
+                            st.markdown(f"**{col}:** {val}")
+
         st.caption(f"Total de registros: {len(df_final)}")
 
 # ─────────────────────────────────────────────
@@ -1092,3 +1140,5 @@ if tab_gest:
                                 st.rerun()
                         else:
                             st.caption("Em uso")
+
+            
