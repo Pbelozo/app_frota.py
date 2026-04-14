@@ -577,52 +577,40 @@ with tab_ret:
                     if revisao_vencida(r):
                         st.warning("🔧 Atenção: revisão vencida! O veículo pode ser retirado mas precisa de manutenção.")
 
-        # ── Foto: capturada fora de qualquer form ────────────────────────────
-        foto_ret_file = st.file_uploader(
-            "📷 Foto da retirada (opcional)", type=["jpg","jpeg","png"],
-            key="uploader_retirada"
-        )
-        # Converte imediatamente para base64 e guarda no session_state
-        if foto_ret_file is not None:
-            st.session_state["foto_ret_b64"] = imagem_para_base64(foto_ret_file.read())
-            st.success("✅ Foto carregada com sucesso.")
-        elif "foto_ret_b64" not in st.session_state:
-            st.session_state["foto_ret_b64"] = ""
+        obs_ret  = st.text_area("Observações", key="obs_ret")
+        avs_ret  = st.multiselect("Avarias observadas na saída", av_ativas, key="avs_ret")
+        foto_ret_file = st.file_uploader("📷 Foto da retirada (opcional)", type=["jpg","jpeg","png"])
 
-        with st.form("form_retirada"):
-            obs_ret  = st.text_area("Observações")
-            avs_ret  = st.multiselect("Avarias observadas na saída", av_ativas)
-            if st.form_submit_button("✅ Confirmar Retirada"):
-                if not veic_sel_ret:
-                    st.error("Selecione um veículo.")
+        if st.button("✅ Confirmar Retirada", type="primary"):
+            if not veic_sel_ret:
+                st.error("Selecione um veículo.")
+            else:
+                placa_sel = veic_sel_ret.split("(")[-1].replace(")","").strip()
+                row_v = df_v[df_v["Placa"]==placa_sel]
+                if row_v.empty:
+                    st.error("Veículo não encontrado.")
                 else:
-                    placa_sel = veic_sel_ret.split("(")[-1].replace(")","").strip()
-                    row_v = df_v[df_v["Placa"]==placa_sel]
-                    if row_v.empty:
-                        st.error("Veículo não encontrado.")
-                    else:
-                        row_v = row_v.iloc[0]
-                        km_ini   = safe_get(row_v,"KM_Atual","0")
-                        foto_b64 = st.session_state.pop("foto_ret_b64", "")
-                        append_linha(ABA_HIST,{
-                            "Data":get_dt_br(),"Acao":"Retirada",
-                            "Veiculo":safe_get(row_v,"Modelo",""),"Placa":placa_sel,
-                            "Usuario":st.session_state.login_logado,
-                            "KM_Inicial":km_ini,"KM_Final":"",
-                            "Avarias_Saida":";".join(avs_ret),"Avarias_Chegada":"",
-                            "Foto_Base64":foto_b64,"Obs":obs_ret,
-                            "Tipo_Manutencao":"","Empresa":"","Valor":""
-                        },COLS_HIST)
-                        df_v.loc[df_v["Placa"]==placa_sel,"Status"]="Em uso"
-                        av_lista=[a for a in safe_get(row_v,"Avarias","").split(";") if a.strip()]
-                        for av in avs_ret:
-                            if av not in av_lista: av_lista.append(av)
-                        df_v.loc[df_v["Placa"]==placa_sel,"Avarias"]=";".join(av_lista)
-                        salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
-                        st.session_state.pop("uploader_retirada", None)
-                        st.success(f"✅ Retirada registrada! KM saída: {km_ini}")
-                        invalidar_cache()
-                        st.rerun()
+                    row_v = row_v.iloc[0]
+                    km_ini   = safe_get(row_v,"KM_Atual","0")
+                    foto_b64 = imagem_para_base64(foto_ret_file.read()) if foto_ret_file is not None else ""
+                    append_linha(ABA_HIST,{
+                        "Data":get_dt_br(),"Acao":"Retirada",
+                        "Veiculo":safe_get(row_v,"Modelo",""),"Placa":placa_sel,
+                        "Usuario":st.session_state.login_logado,
+                        "KM_Inicial":km_ini,"KM_Final":"",
+                        "Avarias_Saida":";".join(st.session_state.get("avs_ret",avs_ret)),"Avarias_Chegada":"",
+                        "Foto_Base64":foto_b64,"Obs":st.session_state.get("obs_ret",obs_ret),
+                        "Tipo_Manutencao":"","Empresa":"","Valor":""
+                    },COLS_HIST)
+                    df_v.loc[df_v["Placa"]==placa_sel,"Status"]="Em uso"
+                    av_lista=[a for a in safe_get(row_v,"Avarias","").split(";") if a.strip()]
+                    for av in avs_ret:
+                        if av not in av_lista: av_lista.append(av)
+                    df_v.loc[df_v["Placa"]==placa_sel,"Avarias"]=";".join(av_lista)
+                    salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
+                    st.success(f"✅ Retirada registrada! KM saída: {km_ini}")
+                    invalidar_cache()
+                    st.rerun()
 
 # ─────────────────────────────────────────────
 # 10. DEVOLUÇÃO
@@ -644,55 +632,44 @@ with tab_dev:
         st.info("Você não possui veículos para devolver.")
     else:
         av_ativas = sorted(df_av[df_av["Status"]=="Ativo"]["Descricao"].tolist()) if not df_av.empty and "Status" in df_av.columns else []
-        # ── Foto: convertida imediatamente para base64 fora do form ────────
-        foto_dev_file = st.file_uploader(
-            "📷 Foto da devolução (opcional)", type=["jpg","jpeg","png"],
-            key="uploader_devolucao"
-        )
-        if foto_dev_file is not None:
-            st.session_state["foto_dev_b64"] = imagem_para_base64(foto_dev_file.read())
-            st.success("✅ Foto carregada com sucesso.")
-        elif "foto_dev_b64" not in st.session_state:
-            st.session_state["foto_dev_b64"] = ""
+        veic_dev      = st.selectbox("Veículo a Devolver *", [""]+veics_meus, key="sel_veic_dev")
+        km_dev        = st.number_input("KM Final *", min_value=0, step=1, key="km_dev")
+        obs_dev       = st.text_area("Observações", key="obs_dev")
+        avs_dev       = st.multiselect("Avarias na chegada", av_ativas, key="avs_dev")
+        foto_dev_file = st.file_uploader("📷 Foto da devolução (opcional)", type=["jpg","jpeg","png"])
 
-        with st.form("form_devolucao"):
-            veic_dev = st.selectbox("Veículo a Devolver *", [""]+veics_meus)
-            km_dev   = st.number_input("KM Final *", min_value=0, step=1)
-            obs_dev  = st.text_area("Observações")
-            avs_dev  = st.multiselect("Avarias na chegada", av_ativas)
-            if st.form_submit_button("✅ Confirmar Devolução"):
-                if not veic_dev:
-                    st.error("Selecione um veículo.")
+        if st.button("✅ Confirmar Devolução", type="primary"):
+            if not veic_dev:
+                st.error("Selecione um veículo.")
+            else:
+                placa_dev = veic_dev.split("(")[-1].replace(")","").strip()
+                row_v = df_v[df_v["Placa"]==placa_dev]
+                if row_v.empty:
+                    st.error("Veículo não encontrado.")
                 else:
-                    placa_dev = veic_dev.split("(")[-1].replace(")","").strip()
-                    row_v = df_v[df_v["Placa"]==placa_dev]
-                    if row_v.empty:
-                        st.error("Veículo não encontrado.")
-                    else:
-                        row_v = row_v.iloc[0]
-                        hp = df_hist[(df_hist.get("Placa",pd.Series())==placa_dev)&(df_hist.get("Acao",pd.Series())=="Retirada")] if not df_hist.empty and "Placa" in df_hist.columns else pd.DataFrame()
-                        km_ini_str = str(hp.iloc[-1].get("KM_Inicial","")) if not hp.empty else ""
-                        foto_b64   = st.session_state.pop("foto_dev_b64", "")
-                        append_linha(ABA_HIST,{
-                            "Data":get_dt_br(),"Acao":"Devolucao",
-                            "Veiculo":safe_get(row_v,"Modelo",""),"Placa":placa_dev,
-                            "Usuario":st.session_state.login_logado,
-                            "KM_Inicial":km_ini_str,"KM_Final":str(km_dev),
-                            "Avarias_Saida":"","Avarias_Chegada":";".join(avs_dev),
-                            "Foto_Base64":foto_b64,"Obs":obs_dev,
-                            "Tipo_Manutencao":"","Empresa":"","Valor":""
-                        },COLS_HIST)
-                        df_v.loc[df_v["Placa"]==placa_dev,"Status"]="Disponível"
-                        df_v.loc[df_v["Placa"]==placa_dev,"KM_Atual"]=str(km_dev)
-                        av_lista=[a for a in safe_get(row_v,"Avarias","").split(";") if a.strip()]
-                        for av in avs_dev:
-                            if av not in av_lista: av_lista.append(av)
-                        df_v.loc[df_v["Placa"]==placa_dev,"Avarias"]=";".join(av_lista)
-                        salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
-                        st.session_state.pop("uploader_devolucao", None)
-                        st.success(f"✅ Devolução registrada! KM final: {km_dev}")
-                        invalidar_cache()
-                        st.rerun()
+                    row_v = row_v.iloc[0]
+                    hp = df_hist[(df_hist.get("Placa",pd.Series())==placa_dev)&(df_hist.get("Acao",pd.Series())=="Retirada")] if not df_hist.empty and "Placa" in df_hist.columns else pd.DataFrame()
+                    km_ini_str = str(hp.iloc[-1].get("KM_Inicial","")) if not hp.empty else ""
+                    foto_b64   = imagem_para_base64(foto_dev_file.read()) if foto_dev_file is not None else ""
+                    append_linha(ABA_HIST,{
+                        "Data":get_dt_br(),"Acao":"Devolucao",
+                        "Veiculo":safe_get(row_v,"Modelo",""),"Placa":placa_dev,
+                        "Usuario":st.session_state.login_logado,
+                        "KM_Inicial":km_ini_str,"KM_Final":str(km_dev),
+                        "Avarias_Saida":"","Avarias_Chegada":";".join(avs_dev),
+                        "Foto_Base64":foto_b64,"Obs":obs_dev,
+                        "Tipo_Manutencao":"","Empresa":"","Valor":""
+                    },COLS_HIST)
+                    df_v.loc[df_v["Placa"]==placa_dev,"Status"]="Disponível"
+                    df_v.loc[df_v["Placa"]==placa_dev,"KM_Atual"]=str(km_dev)
+                    av_lista=[a for a in safe_get(row_v,"Avarias","").split(";") if a.strip()]
+                    for av in avs_dev:
+                        if av not in av_lista: av_lista.append(av)
+                    df_v.loc[df_v["Placa"]==placa_dev,"Avarias"]=";".join(av_lista)
+                    salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
+                    st.success(f"✅ Devolução registrada! KM final: {km_dev}")
+                    invalidar_cache()
+                    st.rerun()
 
 # ─────────────────────────────────────────────
 # 11. OFICINA
