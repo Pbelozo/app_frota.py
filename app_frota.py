@@ -746,6 +746,17 @@ with tab_dev:
                     row_v = row_v.iloc[0]
                     hp = df_hist[(df_hist.get("Placa",pd.Series())==placa_dev)&(df_hist.get("Acao",pd.Series())=="Retirada")] if not df_hist.empty and "Placa" in df_hist.columns else pd.DataFrame()
                     km_ini_str = str(hp.iloc[-1].get("KM_Inicial","")) if not hp.empty else ""
+                    # ✅ Valida que KM final não é menor que KM de retirada
+                    try:
+                        km_ini_int = int(km_ini_str) if km_ini_str.strip() else 0
+                    except ValueError:
+                        km_ini_int = 0
+                    if km_dev < km_ini_int:
+                        st.error(f"❌ KM final ({km_dev:,}) não pode ser menor que o KM de retirada ({km_ini_int:,}).")
+                        st.stop()
+                    if km_dev == 0 and km_ini_int > 0:
+                        st.error(f"❌ Informe o KM final do veículo. KM de retirada foi {km_ini_int:,}.")
+                        st.stop()
                     foto_b64   = st.session_state.get("fotos_dev_b64","")
                     append_linha(ABA_HIST,{
                         "Data":get_dt_br(),"Acao":"Devolucao",
