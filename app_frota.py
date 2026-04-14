@@ -546,11 +546,12 @@ with tab_ret:
         st.info("Nenhum veículo disponível para retirada.")
     else:
         av_ativas = sorted(df_av[df_av["Status"]=="Ativo"]["Descricao"].tolist()) if not df_av.empty and "Status" in df_av.columns else []
+        # ✅ CORREÇÃO: file_uploader fora do form para evitar erro de deserialização
+        foto_ret = st.file_uploader("Foto da retirada (opcional)", type=["jpg","jpeg","png"], key="foto_retirada")
         with st.form("form_retirada"):
             veic_sel = st.selectbox("Veículo *", [""]+lista_veics)
             obs_ret  = st.text_area("Observações")
             avs_ret  = st.multiselect("Avarias observadas na saída", av_ativas)
-            foto_ret = st.file_uploader("Foto (opcional)", type=["jpg","jpeg","png"])
             if st.form_submit_button("✅ Confirmar Retirada"):
                 if not veic_sel:
                     st.error("Selecione um veículo.")
@@ -602,12 +603,13 @@ with tab_dev:
         st.info("Você não possui veículos para devolver.")
     else:
         av_ativas = sorted(df_av[df_av["Status"]=="Ativo"]["Descricao"].tolist()) if not df_av.empty and "Status" in df_av.columns else []
+        # ✅ CORREÇÃO: file_uploader fora do form para evitar erro de deserialização
+        foto_dev = st.file_uploader("Foto da devolução (opcional)", type=["jpg","jpeg","png"], key="foto_devolucao")
         with st.form("form_devolucao"):
             veic_dev = st.selectbox("Veículo a Devolver *", [""]+veics_meus)
             km_dev   = st.number_input("KM Final *", min_value=0, step=1)
             obs_dev  = st.text_area("Observações")
             avs_dev  = st.multiselect("Avarias na chegada", av_ativas)
-            foto_dev = st.file_uploader("Foto (opcional)", type=["jpg","jpeg","png"])
             if st.form_submit_button("✅ Confirmar Devolução"):
                 if not veic_dev:
                     st.error("Selecione um veículo.")
