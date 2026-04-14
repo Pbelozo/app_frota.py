@@ -43,8 +43,9 @@ COLS_MOT  = ["Nome","Login","Senha","Validade_CNH","Perfil","Status"]
 COLS_AVAR = ["Descricao","Status"]
 
 # ─────────────────────────────────────────────
-# 3. FUNÇÕES GOOGLE SHEETS
+# 3. FUNÇÕES GOOGLE SHEETS (COM CACHE)
 # ─────────────────────────────────────────────
+@st.cache_data(ttl=30)  # ✅ CORREÇÃO: cache de 30 segundos para evitar erro 429
 def ler_aba(aba, colunas):
     try:
         svc  = get_service()
@@ -63,6 +64,10 @@ def ler_aba(aba, colunas):
     except Exception as e:
         st.error(f"Erro ao ler {aba}: {e}")
         return pd.DataFrame(columns=colunas)
+
+def invalidar_cache():
+    """✅ CORREÇÃO: limpa o cache após salvar dados novos"""
+    ler_aba.clear()
 
 def garantir_aba(aba, colunas, linha_padrao=None):
     try:
@@ -113,8 +118,9 @@ def append_linha(aba, linha_dict, colunas):
         st.error(f"Erro ao adicionar linha em {aba}: {e}")
 
 # ─────────────────────────────────────────────
-# 4. INICIALIZAÇÃO
+# 4. INICIALIZAÇÃO (✅ CORREÇÃO: cache_resource para rodar só uma vez)
 # ─────────────────────────────────────────────
+@st.cache_resource
 def inicializar_sistema():
     linha_paulo = ["Paulo","paulo","123","2030-12-31","Admin","Ativo"]
     garantir_aba(ABA_MOT,  COLS_MOT,  linha_paulo)
@@ -305,6 +311,7 @@ if tab_cad:
                             "Avarias":";".join(avarias_sel),"Status":status_v
                         }, COLS_VEIC)
                         st.success(f"Veículo {mod} ({pla}) cadastrado!")
+                        invalidar_cache()  # ✅ CORREÇÃO
                         st.rerun()
 
             st.write("---")
@@ -344,14 +351,24 @@ if tab_cad:
                             df_v2.at[i,"Criterio_Revisao"]=novo_crit; df_v2.at[i,"Intervalo_KM"]=novo_int_km
                             df_v2.at[i,"Intervalo_Dias"]=novo_int_d; df_v2.at[i,"Status"]=novo_st_v
                             df_v2.at[i,"Avarias"]=";".join(novas_av)
-                            salvar_aba(df_v2, ABA_VEIC, COLS_VEIC); st.success("Atualizado!"); st.rerun()
+                            salvar_aba(df_v2, ABA_VEIC, COLS_VEIC)
+                            st.success("Atualizado!")
+                            invalidar_cache()  # ✅ CORREÇÃO
+                            st.rerun()
                         if btn_bl:
-                            df_v2.at[i,"Status"]="Bloqueado"; salvar_aba(df_v2,ABA_VEIC,COLS_VEIC); st.success("Bloqueado."); st.rerun()
+                            df_v2.at[i,"Status"]="Bloqueado"
+                            salvar_aba(df_v2,ABA_VEIC,COLS_VEIC)
+                            st.success("Bloqueado.")
+                            invalidar_cache()  # ✅ CORREÇÃO
+                            st.rerun()
                         if btn_ex:
                             if historico_tem_veiculo(placa):
                                 st.error("❌ Com histórico — use Bloquear.")
                             else:
-                                salvar_aba(df_v2[df_v2["Placa"]!=placa],ABA_VEIC,COLS_VEIC); st.success("Excluído."); st.rerun()
+                                salvar_aba(df_v2[df_v2["Placa"]!=placa],ABA_VEIC,COLS_VEIC)
+                                st.success("Excluído.")
+                                invalidar_cache()  # ✅ CORREÇÃO
+                                st.rerun()
 
         # Motoristas
         with sub_cad[1]:
@@ -378,7 +395,9 @@ if tab_cad:
                     else:
                         append_linha(ABA_MOT,{"Nome":nome_m,"Login":login_m,"Senha":senha_m,
                             "Validade_CNH":cnh_val.strftime("%Y-%m-%d"),"Perfil":perfil_m,"Status":"Ativo"},COLS_MOT)
-                        st.success(f"Motorista {nome_m} cadastrado!"); st.rerun()
+                        st.success(f"Motorista {nome_m} cadastrado!")
+                        invalidar_cache()  # ✅ CORREÇÃO
+                        st.rerun()
 
             st.write("---"); st.write("### Motoristas Cadastrados")
             df_u2 = ler_aba(ABA_MOT, COLS_MOT)
@@ -410,14 +429,24 @@ if tab_cad:
                             df_u2.at[i,"Validade_CNH"]=nova_cnh_u.strip()
                             df_u2.at[i,"Perfil"]=novo_prf; df_u2.at[i,"Status"]=novo_st_u
                             if nova_senha.strip(): df_u2.at[i,"Senha"]=nova_senha.strip()
-                            salvar_aba(df_u2,ABA_MOT,COLS_MOT); st.success("Atualizado!"); st.rerun()
+                            salvar_aba(df_u2,ABA_MOT,COLS_MOT)
+                            st.success("Atualizado!")
+                            invalidar_cache()  # ✅ CORREÇÃO
+                            st.rerun()
                         if btn_bu:
-                            df_u2.at[i,"Status"]="Bloqueado"; salvar_aba(df_u2,ABA_MOT,COLS_MOT); st.success("Bloqueado."); st.rerun()
+                            df_u2.at[i,"Status"]="Bloqueado"
+                            salvar_aba(df_u2,ABA_MOT,COLS_MOT)
+                            st.success("Bloqueado.")
+                            invalidar_cache()  # ✅ CORREÇÃO
+                            st.rerun()
                         if btn_eu:
                             if historico_tem_motorista(login_u):
                                 st.error("❌ Com histórico — use Bloquear.")
                             else:
-                                salvar_aba(df_u2[df_u2["Login"]!=login_u],ABA_MOT,COLS_MOT); st.success("Excluído."); st.rerun()
+                                salvar_aba(df_u2[df_u2["Login"]!=login_u],ABA_MOT,COLS_MOT)
+                                st.success("Excluído.")
+                                invalidar_cache()  # ✅ CORREÇÃO
+                                st.rerun()
 
         # Avarias
         with sub_cad[2]:
@@ -432,7 +461,9 @@ if tab_cad:
                         st.error("Avaria já cadastrada.")
                     else:
                         append_linha(ABA_AVAR,{"Descricao":desc_av.strip(),"Status":"Ativo"},COLS_AVAR)
-                        st.success("Avaria cadastrada!"); st.rerun()
+                        st.success("Avaria cadastrada!")
+                        invalidar_cache()  # ✅ CORREÇÃO
+                        st.rerun()
 
             st.write("---"); st.write("### Avarias Cadastradas")
             df_av2 = ler_aba(ABA_AVAR, COLS_AVAR)
@@ -447,13 +478,20 @@ if tab_cad:
                         col_b1,col_b2 = st.columns(2)
                         with col_b1:
                             if st.button("🔒 Bloquear", key=f"blk_avcad_{i}"):
-                                df_av2.at[i,"Status"]="Bloqueado"; salvar_aba(df_av2,ABA_AVAR,COLS_AVAR); st.success("Bloqueada."); st.rerun()
+                                df_av2.at[i,"Status"]="Bloqueado"
+                                salvar_aba(df_av2,ABA_AVAR,COLS_AVAR)
+                                st.success("Bloqueada.")
+                                invalidar_cache()  # ✅ CORREÇÃO
+                                st.rerun()
                         with col_b2:
                             if em_uso:
                                 st.warning("❌ Em uso — use Bloquear.")
                             else:
                                 if st.button("🗑️ Excluir", key=f"del_avcad_{i}", type="primary"):
-                                    salvar_aba(df_av2[df_av2["Descricao"]!=desc_i],ABA_AVAR,COLS_AVAR); st.success("Excluída."); st.rerun()
+                                    salvar_aba(df_av2[df_av2["Descricao"]!=desc_i],ABA_AVAR,COLS_AVAR)
+                                    st.success("Excluída.")
+                                    invalidar_cache()  # ✅ CORREÇÃO
+                                    st.rerun()
 
 # ─────────────────────────────────────────────
 # 9. RETIRADA
@@ -508,7 +546,9 @@ with tab_ret:
                             if av not in av_lista: av_lista.append(av)
                         df_v.loc[df_v["Placa"]==placa_sel,"Avarias"]=";".join(av_lista)
                         salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
-                        st.success(f"Retirada registrada! KM saída: {km_ini}"); st.rerun()
+                        st.success(f"Retirada registrada! KM saída: {km_ini}")
+                        invalidar_cache()  # ✅ CORREÇÃO
+                        st.rerun()
 
 # ─────────────────────────────────────────────
 # 10. DEVOLUÇÃO
@@ -565,7 +605,9 @@ with tab_dev:
                             if av not in av_lista: av_lista.append(av)
                         df_v.loc[df_v["Placa"]==placa_dev,"Avarias"]=";".join(av_lista)
                         salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
-                        st.success(f"Devolução registrada! KM final: {km_dev}"); st.rerun()
+                        st.success(f"Devolução registrada! KM final: {km_dev}")
+                        invalidar_cache()  # ✅ CORREÇÃO
+                        st.rerun()
 
 # ─────────────────────────────────────────────
 # 11. OFICINA
@@ -602,7 +644,9 @@ with tab_ofc:
                             df_v.loc[df_v["Placa"]==placa_man,"Ultima_Revisao"]=date.today().strftime("%Y-%m-%d")
                             df_v.loc[df_v["Placa"]==placa_man,"KM_Ultima_Revisao"]=safe_get(row_v.iloc[0],"KM_Atual","0")
                             salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
-                        st.success(f"Manutenção registrada: {tipo_man} — {empresa_man} — R$ {valor_man:.2f}"); st.rerun()
+                        st.success(f"Manutenção registrada: {tipo_man} — {empresa_man} — R$ {valor_man:.2f}")
+                        invalidar_cache()  # ✅ CORREÇÃO
+                        st.rerun()
     else:
         st.write("#### Registrar Reparo de Avarias")
         veics_com_av = [f"{safe_get(r,'Modelo','')} ({safe_get(r,'Placa','')})"
@@ -644,7 +688,9 @@ with tab_ofc:
                                        if a.strip() and a.strip() not in avs_corrigir]
                             df_v.loc[df_v["Placa"]==placa_rep,"Avarias"]=";".join(restantes)
                             salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
-                            st.success(f"Reparo registrado! Avarias removidas: {', '.join(avs_corrigir)}"); st.rerun()
+                            st.success(f"Reparo registrado! Avarias removidas: {', '.join(avs_corrigir)}")
+                            invalidar_cache()  # ✅ CORREÇÃO
+                            st.rerun()
 
 # ─────────────────────────────────────────────
 # 12. HISTÓRICO
@@ -704,12 +750,22 @@ if tab_gest:
                             with col_b2: bl=st.form_submit_button("🔒 Bloquear")
                         if sv:
                             df_v.at[i,"KM_Atual"]=novo_km; df_v.at[i,"Criterio_Revisao"]=novo_crit; df_v.at[i,"Status"]=novo_st
-                            salvar_aba(df_v,ABA_VEIC,COLS_VEIC); st.success("Atualizado!"); st.rerun()
+                            salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
+                            st.success("Atualizado!")
+                            invalidar_cache()  # ✅ CORREÇÃO
+                            st.rerun()
                         if bl:
-                            df_v.at[i,"Status"]="Bloqueado"; salvar_aba(df_v,ABA_VEIC,COLS_VEIC); st.success("Bloqueado."); st.rerun()
+                            df_v.at[i,"Status"]="Bloqueado"
+                            salvar_aba(df_v,ABA_VEIC,COLS_VEIC)
+                            st.success("Bloqueado.")
+                            invalidar_cache()  # ✅ CORREÇÃO
+                            st.rerun()
                         if not historico_tem_veiculo(placa):
                             if st.button(f"🗑️ Excluir {modelo}",key=f"gv_del_{i}"):
-                                salvar_aba(df_v[df_v["Placa"]!=placa],ABA_VEIC,COLS_VEIC); st.success("Excluído."); st.rerun()
+                                salvar_aba(df_v[df_v["Placa"]!=placa],ABA_VEIC,COLS_VEIC)
+                                st.success("Excluído.")
+                                invalidar_cache()  # ✅ CORREÇÃO
+                                st.rerun()
                         else:
                             st.caption("⚠️ Com histórico — use Bloquear.")
 
@@ -735,14 +791,28 @@ if tab_gest:
                             with col_b3: ru=st.form_submit_button("🔑 Reset Senha")
                         if su:
                             df_u.at[i,"Validade_CNH"]=nova_cnh; df_u.at[i,"Perfil"]=novo_prf; df_u.at[i,"Status"]=novo_st
-                            salvar_aba(df_u,ABA_MOT,COLS_MOT); st.success("Atualizado!"); st.rerun()
+                            salvar_aba(df_u,ABA_MOT,COLS_MOT)
+                            st.success("Atualizado!")
+                            invalidar_cache()  # ✅ CORREÇÃO
+                            st.rerun()
                         if bu:
-                            df_u.at[i,"Status"]="Bloqueado"; salvar_aba(df_u,ABA_MOT,COLS_MOT); st.success("Bloqueado."); st.rerun()
+                            df_u.at[i,"Status"]="Bloqueado"
+                            salvar_aba(df_u,ABA_MOT,COLS_MOT)
+                            st.success("Bloqueado.")
+                            invalidar_cache()  # ✅ CORREÇÃO
+                            st.rerun()
                         if ru:
-                            df_u.at[i,"Senha"]="123"; salvar_aba(df_u,ABA_MOT,COLS_MOT); st.success("Senha resetada para 123."); st.rerun()
+                            df_u.at[i,"Senha"]="123"
+                            salvar_aba(df_u,ABA_MOT,COLS_MOT)
+                            st.success("Senha resetada para 123.")
+                            invalidar_cache()  # ✅ CORREÇÃO
+                            st.rerun()
                         if not historico_tem_motorista(login_u):
                             if st.button(f"🗑️ Excluir {nome_u}",key=f"gu_del_{i}"):
-                                salvar_aba(df_u[df_u["Login"]!=login_u],ABA_MOT,COLS_MOT); st.success("Excluído."); st.rerun()
+                                salvar_aba(df_u[df_u["Login"]!=login_u],ABA_MOT,COLS_MOT)
+                                st.success("Excluído.")
+                                invalidar_cache()  # ✅ CORREÇÃO
+                                st.rerun()
                         else:
                             st.caption("⚠️ Com histórico — use Bloquear.")
 
@@ -758,10 +828,16 @@ if tab_gest:
                     with col1: st.write(f"**{desc}** — {st_av}")
                     with col2:
                         if st.button("🔒",key=f"gu_blk_{i}",help="Bloquear"):
-                            df_av.at[i,"Status"]="Bloqueado"; salvar_aba(df_av,ABA_AVAR,COLS_AVAR); st.rerun()
+                            df_av.at[i,"Status"]="Bloqueado"
+                            salvar_aba(df_av,ABA_AVAR,COLS_AVAR)
+                            invalidar_cache()  # ✅ CORREÇÃO
+                            st.rerun()
                     with col3:
                         if not avaria_em_uso(desc):
                             if st.button("🗑️",key=f"gu_del_av_{i}",help="Excluir"):
-                                salvar_aba(df_av[df_av["Descricao"]!=desc],ABA_AVAR,COLS_AVAR); st.success(f"'{desc}' excluída."); st.rerun()
+                                salvar_aba(df_av[df_av["Descricao"]!=desc],ABA_AVAR,COLS_AVAR)
+                                st.success(f"'{desc}' excluída.")
+                                invalidar_cache()  # ✅ CORREÇÃO
+                                st.rerun()
                         else:
                             st.caption("Em uso")
