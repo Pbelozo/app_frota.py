@@ -121,13 +121,7 @@ def append_linha(aba, linha_dict, colunas):
 # 4. INICIALIZAÇÃO (✅ CORREÇÃO: cache_resource para rodar só uma vez)
 # ─────────────────────────────────────────────
 @st.cache_resource
-def inicializar_sistema()
-
-# Contadores para forçar recriação dos file_uploaders após cada submissão
-if "upload_key_ret" not in st.session_state:
-    st.session_state["upload_key_ret"] = 0
-if "upload_key_dev" not in st.session_state:
-    st.session_state["upload_key_dev"] = 0:
+def inicializar_sistema():
     linha_paulo = ["Paulo","paulo","123","2030-12-31","Admin","Ativo"]
     try:
         svc  = get_service()
@@ -170,6 +164,13 @@ if "upload_key_dev" not in st.session_state:
         st.error(f"Erro na inicialização: {e}")
 
 inicializar_sistema()
+
+# Contadores para forçar recriação dos file_uploaders após cada submissão
+if "upload_key_ret" not in st.session_state:
+    st.session_state["upload_key_ret"] = 0
+if "upload_key_dev" not in st.session_state:
+    st.session_state["upload_key_dev"] = 0
+
 
 # ─────────────────────────────────────────────
 # 5. FUNÇÕES DE APOIO
