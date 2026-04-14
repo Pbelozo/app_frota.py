@@ -203,29 +203,82 @@ def cnh_valida(row):
     return d is not None and d >= date.today()
 
 def revisao_vencida(row):
+    """
+    Critério "Ambos": vence pelo que ocorrer PRIMEIRO (KM OU Data).
+    Critério "KM": só verifica quilometragem.
+    Critério "Data": só verifica data.
+    """
     try:
         criterio = safe_get(row,"Criterio_Revisao","").strip()
-        vencida  = False
+
+        km_vencido = False
         if criterio in ("KM","Ambos"):
             try:
                 km_atual = int(safe_get(row,"KM_Atual","0") or "0")
                 int_km   = int(safe_get(row,"Intervalo_KM","0") or "0")
                 km_ult   = int(safe_get(row,"KM_Ultima_Revisao","0") or "0")
                 if int_km > 0 and (km_atual - km_ult) >= int_km:
-                    vencida = True
+                    km_vencido = True
             except Exception:
                 pass
+
+        data_vencida = False
         if criterio in ("Data","Ambos"):
-            d_rev  = str_para_date(safe_get(row,"Ultima_Revisao",""))
+            d_rev = str_para_date(safe_get(row,"Ultima_Revisao",""))
             try:
                 int_d = int(safe_get(row,"Intervalo_Dias","0") or "0")
             except Exception:
                 int_d = 0
             if d_rev and int_d > 0 and date.today() >= d_rev + timedelta(days=int_d):
-                vencida = True
-        return vencida
+                data_vencida = True
+
+        # Para "Ambos": vence se QUALQUER critério estiver vencido (o que vencer primeiro)
+        if criterio == "Ambos":
+            return km_vencido or data_vencida
+        elif criterio == "KM":
+            return km_vencido
+        elif criterio == "Data":
+            return data_vencida
+        return False
     except Exception:
         return False
+
+
+def revisao_alerta(row):
+    """Retorna texto descritivo do motivo do alerta de revisão."""
+    try:
+        criterio = safe_get(row,"Criterio_Revisao","").strip()
+        msgs = []
+        if criterio in ("KM","Ambos"):
+            try:
+                km_atual = int(safe_get(row,"KM_Atual","0") or "0")
+                int_km   = int(safe_get(row,"Intervalo_KM","0") or "0")
+                km_ult   = int(safe_get(row,"KM_Ultima_Revisao","0") or "0")
+                rodados  = km_atual - km_ult
+                if int_km > 0:
+                    if rodados >= int_km:
+                        msgs.append(f"KM vencida ({rodados:,} km rodados, limite {int_km:,} km)")
+                    else:
+                        faltam = int_km - rodados
+                        msgs.append(f"KM ok — faltam {faltam:,} km para revisão")
+            except Exception:
+                pass
+        if criterio in ("Data","Ambos"):
+            d_rev = str_para_date(safe_get(row,"Ultima_Revisao",""))
+            try:
+                int_d = int(safe_get(row,"Intervalo_Dias","0") or "0")
+            except Exception:
+                int_d = 0
+            if d_rev and int_d > 0:
+                proxima = d_rev + timedelta(days=int_d)
+                if date.today() >= proxima:
+                    msgs.append(f"Data vencida (próxima era {proxima.strftime('%d/%m/%Y')})")
+                else:
+                    faltam_d = (proxima - date.today()).days
+                    msgs.append(f"Data ok — faltam {faltam_d} dias para revisão")
+        return " | ".join(msgs) if msgs else ""
+    except Exception:
+        return ""
 
 def historico_tem_veiculo(placa):
     df = ler_aba(ABA_HIST, COLS_HIST)
@@ -581,11 +634,14 @@ with tab_ret:
                         st.metric("Avarias", len(avarias_atuais))
                     if avarias_atuais:
                         st.warning(f"⚠️ Avarias registradas: {', '.join(avarias_atuais)}")
+                    alerta_rev = revisao_alerta(r)
                     if revisao_vencida(r):
-                        st.warning("🔧 Atenção: revisão vencida! O veículo pode ser retirado mas precisa de manutenção.")
+                        st.warning(f"🔧 Revisão vencida! {alerta_rev} — O veículo pode ser retirado mas precisa de manutenção.")
+                    elif alerta_rev:
+                        st.info(f"ℹ️ {alerta_rev}")
 
         obs_ret = st.text_area("Observações", key="obs_ret")
-        avs_ret = st.multiselect("Avarias observadas na saída", av_ativas, key="avs_ret")
+        avs_ret = st.multiselect("Avarias observadas na saída", av_ativas, default=[], key="avs_ret")
 
         # ── Foto via câmera (sem bug de deserialização) ─────────────────────
         st.markdown("**📷 Foto da retirada (opcional)**")
