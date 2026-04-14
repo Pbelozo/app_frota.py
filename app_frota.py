@@ -1168,34 +1168,51 @@ with tab_hist:
         )
 
         # ── Detalhe expandido por linha para leitura completa ────────────────
+        # Garante índice sequencial para busca correta
+        df_show_reset = df_show.reset_index(drop=True)
+
         with st.expander("🔎 Ver detalhes completos de um registro"):
             idx_sel = st.number_input("Número da linha (0 = primeira)",
                                       min_value=0, max_value=max(0, len(df_final)-1),
                                       step=1, key="hist_detail_idx")
             if not df_final.empty:
-                # Busca a linha original (com Foto_Base64) pelo índice
-                row_orig = df_show.iloc[int(idx_sel)] if int(idx_sel) < len(df_show) else None
-                row_sel  = df_final.iloc[int(idx_sel)]
-                c1, c2   = st.columns(2)
+                idx = int(idx_sel)
+                row_sel  = df_final.iloc[idx]
+                row_orig = df_show_reset.iloc[idx] if idx < len(df_show_reset) else None
+
+                c1, c2 = st.columns(2)
                 for i, (col, val) in enumerate(row_sel.items()):
                     with (c1 if i % 2 == 0 else c2):
-                        if str(val) not in ("", "nan", "None"):
+                        if str(val) not in ("", "nan", "None", "0"):
                             st.markdown(f"**{col}:** {val}")
 
-                # Exibe fotos se existirem
+                # Exibe fotos
                 if row_orig is not None:
                     fotos_raw = str(row_orig.get("Foto_Base64","")).strip()
-                    if fotos_raw:
-                        fotos_lista = [f for f in fotos_raw.split("||") if f.strip()]
+                    # Remove textos de placeholder
+                    if fotos_raw and fotos_raw not in ("nan","None","","[foto omitida: arquivo muito grande]"):
+                        fotos_lista = [f.strip() for f in fotos_raw.split("||") if f.strip() and len(f.strip()) > 100]
                         if fotos_lista:
+                            st.markdown("---")
                             st.markdown(f"**📷 Fotos ({len(fotos_lista)}):**")
                             cols_f = st.columns(min(len(fotos_lista), 3))
                             for fi, fb64 in enumerate(fotos_lista):
                                 with cols_f[fi % 3]:
                                     try:
-                                        st.image(base64.b64decode(fb64), width=250)
-                                    except Exception:
-                                        st.caption("Foto inválida")
+                                        # Limpa possíveis caracteres inválidos no base64
+                                        fb64_clean = fb64.replace(" ","").replace("\n","")
+                                        # Adiciona padding se necessário
+                                        padding = 4 - len(fb64_clean) % 4
+                                        if padding != 4:
+                                            fb64_clean += "=" * padding
+                                        img_bytes = base64.b64decode(fb64_clean)
+                                        st.image(img_bytes, width=280, caption=f"Foto {fi+1}")
+                                    except Exception as ex:
+                                        st.caption(f"Erro ao exibir foto {fi+1}: {ex}")
+                        else:
+                            st.caption("📷 Nenhuma foto válida neste registro.")
+                    elif fotos_raw == "[foto omitida: arquivo muito grande]":
+                        st.warning("📷 Foto omitida no registro — arquivo era muito grande.")
 
         st.caption(f"Total de registros: {len(df_final)}")
 
