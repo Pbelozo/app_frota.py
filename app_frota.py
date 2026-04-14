@@ -587,27 +587,13 @@ with tab_ret:
         obs_ret = st.text_area("Observações", key="obs_ret")
         avs_ret = st.multiselect("Avarias observadas na saída", av_ativas, key="avs_ret")
 
-        # ── Upload múltiplo de fotos ─────────────────────────────────────────
-        st.markdown("**📷 Fotos da retirada (opcional)**")
-        fotos_ret = st.file_uploader(
-            "Selecione uma ou mais fotos",
-            type=["jpg","jpeg","png"],
-            accept_multiple_files=True,
-            key=f"fu_ret_{st.session_state['upload_key_ret']}"
-        )
-        # Converte cada arquivo para base64 imediatamente ao carregar
-        if fotos_ret:
-            fotos_b64_list = []
-            cols_prev = st.columns(min(len(fotos_ret), 4))
-            for idx, f in enumerate(fotos_ret):
-                fotos_b64_list.append(imagem_para_base64(f.read()))
-                with cols_prev[idx % 4]:
-                    f.seek(0)
-                    st.image(f, caption=f.name, use_container_width=True)
-            st.session_state["fotos_ret_b64"] = "||".join(fotos_b64_list)
-        else:
-            if "fotos_ret_b64" not in st.session_state:
-                st.session_state["fotos_ret_b64"] = ""
+        # ── Foto via câmera (sem bug de deserialização) ─────────────────────
+        st.markdown("**📷 Foto da retirada (opcional)**")
+        cam_ret = st.camera_input("Tirar foto", key="cam_ret")
+        if cam_ret is not None:
+            st.session_state["fotos_ret_b64"] = imagem_para_base64(cam_ret.read())
+        elif "fotos_ret_b64" not in st.session_state:
+            st.session_state["fotos_ret_b64"] = ""
 
         if st.button("✅ Confirmar Retirada", type="primary", key="btn_confirmar_ret"):
             if not veic_sel_ret:
@@ -671,26 +657,13 @@ with tab_dev:
         obs_dev  = st.text_area("Observações", key="obs_dev")
         avs_dev  = st.multiselect("Avarias na chegada", av_ativas, key="avs_dev")
 
-        # ── Upload múltiplo de fotos ─────────────────────────────────────────
-        st.markdown("**📷 Fotos da devolução (opcional)**")
-        fotos_dev = st.file_uploader(
-            "Selecione uma ou mais fotos",
-            type=["jpg","jpeg","png"],
-            accept_multiple_files=True,
-            key=f"fu_dev_{st.session_state['upload_key_dev']}"
-        )
-        if fotos_dev:
-            fotos_b64_list = []
-            cols_prev = st.columns(min(len(fotos_dev), 4))
-            for idx, f in enumerate(fotos_dev):
-                fotos_b64_list.append(imagem_para_base64(f.read()))
-                with cols_prev[idx % 4]:
-                    f.seek(0)
-                    st.image(f, caption=f.name, use_container_width=True)
-            st.session_state["fotos_dev_b64"] = "||".join(fotos_b64_list)
-        else:
-            if "fotos_dev_b64" not in st.session_state:
-                st.session_state["fotos_dev_b64"] = ""
+        # ── Foto via câmera (sem bug de deserialização) ─────────────────────
+        st.markdown("**📷 Foto da devolução (opcional)**")
+        cam_dev = st.camera_input("Tirar foto", key="cam_dev")
+        if cam_dev is not None:
+            st.session_state["fotos_dev_b64"] = imagem_para_base64(cam_dev.read())
+        elif "fotos_dev_b64" not in st.session_state:
+            st.session_state["fotos_dev_b64"] = ""
 
         if st.button("✅ Confirmar Devolução", type="primary", key="btn_confirmar_dev"):
             if not veic_dev:
