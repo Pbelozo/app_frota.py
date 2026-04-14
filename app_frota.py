@@ -320,46 +320,48 @@ def imagem_para_base64(img_bytes):
 def widget_fotos(prefixo: str, label: str):
     """
     Widget de fotos com câmera e upload múltiplo.
-    Armazena lista de base64 em st.session_state[f"{prefixo}_fotos_b64"].
-    Retorna a lista atual de base64.
+    Converte imediatamente para base64 — sem st.rerun() para não bloquear confirmação.
+    Armazena lista em st.session_state[f"{prefixo}_fotos_b64"].
     """
-    key_list  = f"{prefixo}_fotos_b64"
-    key_modo  = f"{prefixo}_foto_modo"
-    key_cam   = f"{prefixo}_cam_idx"
+    key_list = f"{prefixo}_fotos_b64"
+    key_cam  = f"{prefixo}_cam_idx"
+    key_upk  = f"{prefixo}_up_key"
 
-    if key_list  not in st.session_state: st.session_state[key_list]  = []
-    if key_modo  not in st.session_state: st.session_state[key_modo]  = "upload"
-    if key_cam   not in st.session_state: st.session_state[key_cam]   = 0
+    if key_list not in st.session_state: st.session_state[key_list] = []
+    if key_cam  not in st.session_state: st.session_state[key_cam]  = 0
+    if key_upk  not in st.session_state: st.session_state[key_upk]  = 0
 
     st.markdown(f"**📷 {label}**")
 
-    # Abas: câmera ou upload
     aba_cam, aba_up = st.tabs(["📸 Câmera", "🖼️ Upload de arquivos"])
 
     with aba_cam:
+        # Tamanho menor: width=300
         cam = st.camera_input("Tirar foto", key=f"cam_{prefixo}_{st.session_state[key_cam]}")
         if cam is not None:
             b64 = imagem_para_base64(cam.read())
-            st.session_state[key_list].append(b64)
-            # Incrementa key para limpar câmera e permitir nova foto
+            if b64 not in st.session_state[key_list]:   # evita duplicata
+                st.session_state[key_list].append(b64)
+                st.session_state[key_cam] += 1          # reseta câmera sem rerun global
+        if st.button("📸 Confirmar foto e tirar outra", key=f"btn_cam_{prefixo}"):
             st.session_state[key_cam] += 1
-            st.rerun()
 
     with aba_up:
         uploads = st.file_uploader(
             "Selecione uma ou mais imagens",
             type=["jpg","jpeg","png"],
             accept_multiple_files=True,
-            key=f"up_{prefixo}_{st.session_state.get(f'{prefixo}_up_key',0)}"
+            key=f"up_{prefixo}_{st.session_state[key_upk]}"
         )
         if uploads:
             novos = [imagem_para_base64(f.read()) for f in uploads]
-            st.session_state[key_list].extend(novos)
-            # Reseta uploader e limpa lista de uploads
-            st.session_state[f"{prefixo}_up_key"] = st.session_state.get(f"{prefixo}_up_key",0) + 1
-            st.rerun()
+            for b in novos:
+                if b not in st.session_state[key_list]:
+                    st.session_state[key_list].append(b)
+            if st.button("✅ Confirmar upload", key=f"btn_up_{prefixo}"):
+                st.session_state[key_upk] += 1
 
-    # Mostra miniaturas com botão de remover
+    # Miniaturas menores (width fixo via HTML) com botão remover
     fotos = st.session_state[key_list]
     if fotos:
         st.markdown(f"**{len(fotos)} foto(s) adicionada(s):**")
@@ -369,14 +371,13 @@ def widget_fotos(prefixo: str, label: str):
             with cols[idx % 4]:
                 try:
                     img_bytes = base64.b64decode(b64)
-                    st.image(img_bytes, use_container_width=True)
+                    st.image(img_bytes, width=150)
                 except Exception:
                     st.warning("Imagem inválida")
-                if st.button("🗑️ Remover", key=f"rm_{prefixo}_{idx}"):
+                if st.button("🗑️", key=f"rm_{prefixo}_{idx}", help="Remover foto"):
                     to_remove = idx
         if to_remove is not None:
             st.session_state[key_list].pop(to_remove)
-            st.rerun()
     else:
         st.caption("Nenhuma foto adicionada ainda.")
 
@@ -1080,12 +1081,29 @@ with tab_hist:
                                       min_value=0, max_value=max(0, len(df_final)-1),
                                       step=1, key="hist_detail_idx")
             if not df_final.empty:
-                row_sel = df_final.iloc[int(idx_sel)]
-                c1, c2 = st.columns(2)
+                # Busca a linha original (com Foto_Base64) pelo índice
+                row_orig = df_show.iloc[int(idx_sel)] if int(idx_sel) < len(df_show) else None
+                row_sel  = df_final.iloc[int(idx_sel)]
+                c1, c2   = st.columns(2)
                 for i, (col, val) in enumerate(row_sel.items()):
                     with (c1 if i % 2 == 0 else c2):
                         if str(val) not in ("", "nan", "None"):
                             st.markdown(f"**{col}:** {val}")
+
+                # Exibe fotos se existirem
+                if row_orig is not None:
+                    fotos_raw = str(row_orig.get("Foto_Base64","")).strip()
+                    if fotos_raw:
+                        fotos_lista = [f for f in fotos_raw.split("||") if f.strip()]
+                        if fotos_lista:
+                            st.markdown(f"**📷 Fotos ({len(fotos_lista)}):**")
+                            cols_f = st.columns(min(len(fotos_lista), 3))
+                            for fi, fb64 in enumerate(fotos_lista):
+                                with cols_f[fi % 3]:
+                                    try:
+                                        st.image(base64.b64decode(fb64), width=250)
+                                    except Exception:
+                                        st.caption("Foto inválida")
 
         st.caption(f"Total de registros: {len(df_final)}")
 
